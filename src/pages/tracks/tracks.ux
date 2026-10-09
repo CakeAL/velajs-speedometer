@@ -1,0 +1,141 @@
+<template>
+  <div class="page {{pageClass}}">
+    <div class="header {{narrow ? 'band-header' : ''}}"><text class="title {{narrow ? 'band-title' : ''}}">GPX 轨迹</text><text class="count">{{files.length}}</text></div>
+    <list if="{{selectedUri}}" class="file-detail">
+      <list-item type="filename" class="filename-row {{narrow ? 'band-filename-row' : ''}}"><text class="filename {{narrow ? 'band-filename' : ''}}">{{selectedName}}</text></list-item>
+      <list-item type="reading" class="file-reading {{narrow ? 'band-file-reading' : ''}}"><text class="file-label {{narrow ? 'band-file-label' : ''}}">轨迹点</text><text class="file-value {{narrow ? 'band-file-value' : ''}}">{{pointCount}}</text></list-item>
+      <list-item type="reading" class="file-reading {{narrow ? 'band-file-reading' : ''}}"><text class="file-label {{narrow ? 'band-file-label' : ''}}">时长</text><text class="file-value {{narrow ? 'band-file-value' : ''}}">{{duration}}</text></list-item>
+      <list-item type="reading" class="file-reading {{narrow ? 'band-file-reading' : ''}}"><text class="file-label {{narrow ? 'band-file-label' : ''}}">海拔范围</text><text class="file-value {{narrow ? 'band-file-value' : ''}}">{{elevation}}</text></list-item>
+      <list-item type="notice" class="notice-row {{narrow ? 'band-notice-row' : ''}}"><text class="hint {{narrow ? 'band-hint' : ''}}">{{message}}</text></list-item>
+      <list-item type="delete" class="delete-row {{narrow ? 'band-delete-row' : ''}}">
+        <div class="action delete-button {{narrow ? 'band-action' : ''}} {{narrow ? 'band-delete-button' : ''}}" onclick="deleteSelected"><text class="action-text {{narrow ? 'band-action-text' : ''}}">{{confirmDelete ? '确认删除' : '删除文件'}}</text></div>
+        <div if="{{confirmDelete}}" class="action secondary cancel-button {{narrow ? 'band-action' : ''}}" onclick="cancelDelete"><text class="action-text {{narrow ? 'band-action-text' : ''}}">取消</text></div>
+      </list-item>
+    </list>
+    <list else class="file-list">
+      <list-item type="empty" if="{{files.length === 0}}" class="empty"><text class="hint {{narrow ? 'band-hint' : ''}}">{{message || '暂无轨迹，点击首页的记录开始'}}</text></list-item>
+      <list-item type="track" for="{{files}}" tid="uri" class="file-item {{narrow ? 'band-file-item' : ''}}" onclick="selectFile($item.uri)">
+        <text class="file-name {{narrow ? 'band-file-name' : ''}}">{{$item.label}}</text>
+        <text class="file-size {{narrow ? 'band-file-size' : ''}}">GPX · {{$item.size}}</text>
+      </list-item>
+      <list-item type="message" if="{{files.length > 0 &amp;&amp; message}}" class="list-message"><text class="hint {{narrow ? 'band-hint' : ''}}">{{message}}</text></list-item>
+    </list>
+    <div class="footer tracks-footer {{narrow ? 'band-footer' : ''}} {{narrow ? 'band-tracks-footer' : ''}}">
+      <div class="action secondary back-button {{narrow ? 'band-action' : ''}}" onclick="back"><text class="action-text {{narrow ? 'band-action-text' : ''}}">{{selectedUri ? '返回列表' : '返回测速'}}</text></div>
+      <div if="{{!selectedUri}}" class="action secondary refresh-button {{narrow ? 'band-action' : ''}}" onclick="refresh"><text class="action-text {{narrow ? 'band-action-text' : ''}}">刷新</text></div>
+    </div>
+  </div>
+</template>
+<script>
+import file from '@system.file'
+import device from '@system.device'
+import router from '@system.router'
+import { screenLayout } from '../../common/layout'
+import { listTracks, fileCall, assertTrackUri } from '../../common/files'
+import { recoverTracks } from '../../common/recording'
+import { summarizeTrack } from '../../common/track-summary'
+
+export default {
+  private: {
+    pageClass: 'round-page', narrow: false, files: [], selectedUri: '', selectedName: '',
+    pointCount: '--', duration: '--', elevation: '--', message: '', confirmDelete: false, busy: false
+  },
+  onInit() {
+    this._destroyed = false
+    this._version = 0
+    this._session = this.$app.$def.session
+    this._listener = () => {}
+    device.getInfo({ success: info => {
+      if (this._destroyed) return
+      const layout = screenLayout(info); this.pageClass = layout.pageClass; this.narrow = layout.narrow
+    }, fail() {} })
+  },
+  onShow() { this._visible = true; this._session.acquire(this._listener); this.refresh() },
+  onHide() { this._visible = false; this._session.release(this._listener) },
+  onDestroy() { this._destroyed = true; this._version += 1; if (this._visible) this._session.release(this._listener) },
+  async refresh() {
+    if (this.busy) return
+    this.busy = true; this.message = '正在读取轨迹'
+    try {
+      const recovery = await recoverTracks(file, this._session.activeUri())
+      const files = await listTracks(file)
+      if (this._destroyed) return
+      this.files = files; this.message = recovery.failed ? recovery.failed + ' 个未完成文件恢复失败' :
+        (this._session.activeUri() ? '正在记录的轨迹结束后会出现在这里' : '')
+    } catch (error) { if (!this._destroyed) this.message = error.message }
+    finally { this.busy = false }
+  },
+  async selectFile(uri) {
+    if (this.busy) return
+    const entry = this.files.filter(item => item.uri === uri)[0]
+    if (!entry) return
+    this.selectedUri = uri; this.selectedName = entry.name; this.confirmDelete = false
+    this.pointCount = '--'; this.duration = '--'; this.elevation = '--'; this.message = '正在读取轨迹'
+    const version = ++this._version
+    try {
+      const summary = await summarizeTrack(file, uri)
+      if (this._destroyed || version !== this._version) return
+      this.pointCount = String(summary.points); this.duration = summary.duration; this.elevation = summary.elevation
+      this.message = summary.complete ? '包含 UTC 时间和有效 GPS 坐标' : '文件未完整结束'
+    } catch (error) { if (!this._destroyed && version === this._version) this.message = error.message }
+  },
+  async deleteSelected() {
+    if (this.busy || !this.selectedUri) return
+    if (!this.confirmDelete) { this.confirmDelete = true; this.message = '再次点击确认，只删除此文件'; return }
+    const uri = this.selectedUri
+    this.busy = true
+    try {
+      assertTrackUri(uri)
+      await fileCall(file, 'delete', { uri })
+      if (this._destroyed) return
+      this.files = this.files.filter(item => item.uri !== uri)
+      this._version += 1; this.selectedUri = ''; this.confirmDelete = false; this.message = '文件已删除'
+    } catch (error) { if (!this._destroyed) this.message = error.message }
+    finally { this.busy = false }
+  },
+  cancelDelete() { this.confirmDelete = false; this.message = '' },
+  back() {
+    if (this.busy) return
+    if (this.selectedUri) { this._version += 1; this.selectedUri = ''; this.confirmDelete = false; this.message = ''; return }
+    router.back()
+  },
+  onBackPress() { if (this.selectedUri) { this.back(); return true } return false }
+}
+</script>
+<style lang="less">
+@import '../../common/page.less';
+.title { font-size: 16px; font-weight: bold; color: #edf4fa; }
+.count { font-size: 12px; color: #7ef7c5; margin-left: 8px; }
+.file-list { flex: 1; width: 100%; }
+.file-item { width: 100%; height: 56px; flex-direction: column; justify-content: center; border-bottom-width: 1px; border-color: #263b46; }
+.file-name { font-size: 14px; color: #edf4fa; lines: 2; }
+.file-size { font-size: 11px; color: #96aeb8; }
+.empty { height: 110px; align-items: center; justify-content: center; }
+.list-message { height: 34px; }
+.file-detail { flex: 1; width: 100%; }
+.filename-row { width: 100%; height: 30px; align-items: center; }
+.notice-row { width: 100%; height: 28px; align-items: center; }
+.filename { width: 100%; font-size: 11px; color: #96aeb8; lines: 2; }
+.file-reading { width: 100%; height: 30px; align-items: center; justify-content: space-between; }
+.file-label { color: #96aeb8; font-size: 11px; }
+.file-value { color: #edf4fa; font-size: 16px; font-weight: bold; }
+.delete-row { width: 100%; height: 30px; margin-top: 6px; justify-content: center; }
+.delete-button { width: 88px; height: 28px; background-color: #622c35; }
+.cancel-button { width: 58px; height: 28px; margin-left: 6px; }
+.tracks-footer { height: 28px; justify-content: center; }
+.back-button { width: 100px; height: 28px; }
+.refresh-button { width: 58px; height: 28px; margin-left: 8px; }
+.band-title { font-size: 24px; }
+.band-file-item { height: 98px; }
+.band-file-name { font-size: 21px; }
+.band-file-size { font-size: 17px; }
+.band-filename { font-size: 17px; }
+.band-filename-row { height: 52px; }
+.band-notice-row { height: 56px; }
+.band-file-reading { height: 70px; flex-direction: column; justify-content: center; }
+.band-file-label { font-size: 18px; }
+.band-file-value { font-size: 26px; }
+.band-delete-row { height: 104px; flex-direction: column; align-items: center; }
+.band-delete-button { height: 44px; }
+.band-tracks-footer { height: 104px; }
+</style>

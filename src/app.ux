@@ -1,10 +1,22 @@
 <script>
+import geolocation from '@system.geolocation'
+import brightness from '@system.brightness'
+import file from '@system.file'
+import storage from '@system.storage'
+import { createSession } from './common/session'
+import { createAppClock } from './common/app-clock'
+
 export default {
   onCreate() {
-    console.log("app created")
+    this.clock = createAppClock()
+    this.session = createSession({ geolocation, brightness, file, storage }, this.clock)
+  },
+  onHide() {
+    if (this.session) this.session.suspend()
   },
   onDestroy() {
-    console.log("app destroyed")
+    if (this.session) this.session.dispose()
+    if (this.clock) this.clock.dispose()
   }
 }
 </script>

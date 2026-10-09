@@ -18,6 +18,15 @@
     },
     {
       "name": "system.brightness"
+    },
+    {
+      "name": "system.router"
+    },
+    {
+      "name": "system.file"
+    },
+    {
+      "name": "system.storage"
     }
   ],
   "permissions": [
@@ -35,6 +44,12 @@
     "pages": {
       "pages/index": {
         "component": "index"
+      },
+      "pages/position": {
+        "component": "position"
+      },
+      "pages/tracks": {
+        "component": "tracks"
       }
     }
   }

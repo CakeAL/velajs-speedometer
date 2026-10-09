@@ -1,284 +1,60 @@
 <template>
   <div class="page {{pageClass}}">
-    <div class="header">
+    <div class="header {{narrow ? 'band-header' : ''}}">
       <div class="status-dot" style="background-color: {{statusColor}};"></div>
-      <text class="status-text {{narrow ? 'band-status' : ''}}">{{statusText}}</text>
+      <text class="status-text {{narrow ? 'band-status-text' : ''}}">{{statusText}}</text>
     </div>
-
-    <div if="{{!details}}" class="dashboard">
-      <text class="speed {{narrow ? 'band-speed' : ''}} {{tone}}" style="font-size: {{speedFont}}px;">{{speed}}</text>
-      <div class="unit-button {{narrow ? 'band-unit-button' : ''}}" onclick="changeUnit">
-        <text class="unit {{narrow ? 'band-unit' : ''}}">{{unit}} · 切换</text>
-      </div>
-      <div class="altitude-row {{narrow ? 'band-altitude-row' : ''}}">
-        <text class="label {{narrow ? 'band-label' : ''}}">海拔</text>
-        <text class="altitude {{narrow ? 'band-altitude' : ''}}">{{altitude}} m</text>
-      </div>
-      <text class="hint {{narrow ? 'band-hint' : ''}}">{{hint}}</text>
-    </div>
-
-    <div else class="detail-panel">
-      <text class="detail-title {{narrow ? 'band-detail-title' : ''}}">定位详情</text>
-      <div class="detail-coordinate {{narrow ? 'band-detail-coordinate' : ''}}">
-        <text class="detail-label {{narrow ? 'band-detail-label' : ''}}">纬度</text>
-        <text class="detail-value {{narrow ? 'band-detail-value' : ''}}">{{latitudeDetail}}</text>
-      </div>
-      <div class="detail-coordinate {{narrow ? 'band-detail-coordinate' : ''}}">
-        <text class="detail-label {{narrow ? 'band-detail-label' : ''}}">经度</text>
-        <text class="detail-value {{narrow ? 'band-detail-value' : ''}}">{{longitudeDetail}}</text>
-      </div>
-      <div class="detail-metric {{narrow ? 'band-detail-metric' : ''}}">
-        <text class="detail-label {{narrow ? 'band-detail-label' : ''}}">海拔</text>
-        <text class="detail-value {{narrow ? 'band-detail-value' : ''}}">{{altitude}} m</text>
-      </div>
-      <div class="detail-metric {{narrow ? 'band-detail-metric' : ''}}">
-        <text class="detail-label {{narrow ? 'band-detail-label' : ''}}">水平精度</text>
-        <text class="detail-value {{narrow ? 'band-detail-value' : ''}}">{{accuracy}}</text>
-      </div>
-      <text class="detail-note {{narrow ? 'band-detail-note' : ''}}">{{detailNote}}</text>
-      <text class="hint {{narrow ? 'band-hint' : ''}}">{{age}}</text>
-    </div>
-
+    <list class="dashboard">
+      <list-item type="speed" class="speed-row" style="height: {{speedHeight}}px;">
+        <text class="speed {{tone}}" style="font-size: {{speedFont}}px; height: {{speedHeight}}px;">{{speed}}</text>
+      </list-item>
+      <list-item type="unit" class="unit-button {{narrow ? 'band-unit-button' : ''}}" onclick="changeUnit"><text class="unit {{narrow ? 'band-unit' : ''}}">{{unit}} · 切换</text></list-item>
+      <list-item type="stats" class="metrics {{narrow ? 'band-metrics' : ''}}">
+        <div class="metric"><text class="metric-label {{narrow ? 'band-metric-label' : ''}}">历史平均</text><text class="metric-value {{narrow ? 'band-metric-value' : ''}}">{{average}}</text></div>
+        <div class="metric-divider"></div>
+        <div class="metric"><text class="metric-label {{narrow ? 'band-metric-label' : ''}}">历史最高</text><text class="metric-value {{narrow ? 'band-metric-value' : ''}}">{{maximum}}</text></div>
+      </list-item>
+      <list-item type="summary" class="summary {{narrow ? 'band-summary' : ''}}">
+        <text if="{{recordNotice}}" class="hint {{narrow ? 'band-hint' : ''}}">{{recordNotice}}</text>
+        <text if="{{!recordNotice &amp;&amp; altitude !== '--'}}" class="altitude {{narrow ? 'band-altitude' : ''}}">海拔 {{altitude}} m</text>
+        <text if="{{altitude !== '--' &amp;&amp; recording}}" class="record-state {{recording ? 'good' : ''}} {{narrow ? 'band-record-state' : ''}}">{{recording ? recordInfo : ''}}</text>
+        <text if="{{!recordNotice &amp;&amp; altitude === '--'}}" class="hint {{narrow ? 'band-hint' : ''}}">{{recording ? recordInfo : hint}}</text>
+      </list-item>
+    </list>
     <div class="footer {{narrow ? 'band-footer' : ''}}">
-      <div class="action primary {{narrow ? 'band-action' : ''}}" onclick="toggleTracking">
-        <text class="action-text primary-text {{narrow ? 'band-action-text' : ''}}">{{actionText}}</text>
-      </div>
-      <div class="action secondary {{narrow ? 'band-action' : ''}}" onclick="toggleDetails">
-        <text class="action-text {{narrow ? 'band-action-text' : ''}}">{{details ? '测速' : '详情'}}</text>
-      </div>
+      <div class="action primary record-action {{narrow ? 'band-action' : ''}}" onclick="toggleRecording"><text class="action-text primary-text {{narrow ? 'band-action-text' : ''}}">{{recordText}}</text></div>
+      <div class="action secondary {{narrow ? 'band-action' : ''}}" onclick="openPosition"><text class="action-text {{narrow ? 'band-action-text' : ''}}">详情</text></div>
+      <div class="action secondary {{narrow ? 'band-action' : ''}}" onclick="openTracks"><text class="action-text {{narrow ? 'band-action-text' : ''}}">轨迹</text></div>
     </div>
   </div>
 </template>
-
 <script>
-import geolocation from '@system.geolocation'
-import device from '@system.device'
-import brightness from '@system.brightness'
-import { createLocationTracker, locationView } from '../../common/location'
-import { screenLayout } from '../../common/layout'
-
-const STATUS = {
-  idle: 'GPS · 等待定位',
-  locating: 'GPS · 搜星中',
-  live: 'GPS · 已定位',
-  stale: 'GPS · 等待更新',
-  paused: 'GPS · 已暂停',
-  timeout: 'GPS · 定位超时',
-  denied: 'GPS · 无定位权限',
-  unsupported: 'GPS · 接口不可用',
-  error: 'GPS · 定位失败'
-}
-
-export default {
-  private: {
-    pageClass: 'round-page',
-    narrow: false,
-    details: false,
-    speed: '--',
-    speedFont: 80,
-    unit: 'km/h',
-    altitude: '--',
-    latitude: '--',
-    longitude: '--',
-    latitudeDetail: '--',
-    longitudeDetail: '--',
-    accuracy: '--',
-    age: '尚未获取位置',
-    hint: '请在室外等待 GPS 定位',
-    detailNote: '请在室外等待 GPS 定位',
-    tone: 'warning',
-    statusColor: '#f2bf68',
-    statusText: STATUS.locating,
-    actionText: '暂停'
-  },
-
-  onInit() {
-    this._visible = false
-    this._destroyed = false
-    this._paused = false
-    this._unitIndex = 0
-    this._state = { phase: 'idle', fix: null, updatedAt: null, message: '等待定位' }
-    this._tracker = createLocationTracker(geolocation, state => {
-      if (this._destroyed) return
-      this._state = state
-      this.renderReadings()
-    })
-    device.getInfo({
-      success: info => {
-        if (this._destroyed) return
-        const layout = screenLayout(info)
-        this.pageClass = layout.pageClass
-        this.narrow = layout.narrow
-        this.renderReadings()
-      }
-      // The round safe area also works if device info is unavailable.
-    })
-  },
-
-  onShow() {
-    this._visible = true
-    this.keepScreenOn(!this._paused)
-    if (!this._paused && this._tracker) this._tracker.start()
-  },
-
-  onHide() {
-    this._visible = false
-    this.keepScreenOn(false)
-    if (this._tracker) this._tracker.stop()
-  },
-
-  onDestroy() {
-    this._destroyed = true
-    this._visible = false
-    this.keepScreenOn(false)
-    if (this._tracker) this._tracker.stop()
-    this._tracker = null
-  },
-
-  renderReadings() {
-    const view = locationView(this._state, this._unitIndex, Date.now())
-    Object.keys(view).forEach(key => { this[key] = view[key] })
-    this.statusText = STATUS[this._state.phase] || STATUS.error
-    this.statusColor = view.tone === 'good' ? '#7ef7c5' : (view.tone === 'muted' ? '#7b919f' : '#f2bf68')
-    this.actionText = this._state.phase === 'paused' ? '继续' :
-      (['unsupported', 'denied', 'timeout', 'error'].indexOf(this._state.phase) >= 0 ? '重试' : '暂停')
-    this.detailNote = this._state.phase === 'live' ?
-      (this._state.fix && this._state.fix.altitude === null ? '设备未返回海拔' : '海拔与精度由 GPS 提供') : this._state.message
-    // Long readings shrink instead of clipping, including after unit conversion.
-    const speedWidth = this.narrow ? 208 : (this.pageClass === 'rect-page' ? 200 : 184)
-    this.speedFont = Math.min(this.narrow ? 100 : 80,
-      Math.floor(speedWidth / (Math.max(3, view.speed.length) * 0.65)))
-  },
-
-  changeUnit() {
-    this._unitIndex = (this._unitIndex + 1) % 3
-    this.renderReadings()
-  },
-
-  toggleDetails() {
-    this.details = !this.details
-  },
-
-  toggleTracking() {
-    if (!this._visible || !this._tracker) return
-    if (this._state.phase === 'live' || this._state.phase === 'locating' || this._state.phase === 'stale') {
-      this._paused = true
-      this.keepScreenOn(false)
-      this._tracker.stop()
-    } else {
-      this._paused = false
-      this.keepScreenOn(true)
-      this._tracker.retry()
-    }
-  },
-
-  keepScreenOn(enabled) {
-    // Keep the live speed readable, and release the setting on pause or exit.
-    try {
-      brightness.setKeepScreenOn({
-        keepScreenOn: enabled,
-        fail(data, code) { console.warn('Keep screen on unavailable:', code) }
-      })
-    } catch (error) {
-      console.warn('Keep screen on unavailable')
-    }
-  },
-
-  onBackPress() {
-    if (this.details) {
-      this.details = false
-      return true
-    }
-    return false
-  }
-}
+import { createReadingPage } from '../../common/page'
+export default createReadingPage()
 </script>
-
-<style>
-.page {
-  width: 100%;
-  height: 100%;
-  padding: 20px 20px 28px;
-  background-color: #080d12;
-  flex-direction: column;
-  align-items: center;
-}
-.round-page { padding: 20px 28px 28px; }
-.rect-page { padding: 20px 20px 20px; }
-.header {
-  height: 18px;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-}
-.status-dot {
-  width: 5px;
-  height: 5px;
-  margin-right: 5px;
-  border-radius: 3px;
-  background-color: #f2bf68;
-}
-.status-text { font-size: 11px; color: #c5cdd5; }
-.dashboard, .detail-panel {
-  flex: 1;
-  width: 100%;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-}
-.speed {
-  height: 86px;
-  width: 100%;
-  font-size: 80px;
-  font-weight: bold;
-  color: #7ef7c5;
-  text-align: center;
-}
-.unit-button { height: 24px; width: 120px; justify-content: center; align-items: center; }
-.unit { font-size: 12px; color: #a5b7c6; text-align: center; }
-.altitude-row { height: 22px; align-items: center; justify-content: center; }
-.label { font-size: 10px; color: #7b919f; margin-right: 8px; }
-.altitude { font-size: 15px; color: #edf4fa; font-weight: bold; }
-.hint {
-  width: 100%;
-  font-size: 9px;
-  color: #7b919f;
-  text-align: center;
-  margin-top: 4px;
-  lines: 2;
-}
-.footer { height: 30px; width: 136px; flex-shrink: 0; justify-content: space-between; }
-.action { width: 64px; height: 30px; border-radius: 15px; align-items: center; justify-content: center; }
-.primary { background-color: #7ef7c5; }
-.secondary { background-color: #1b2933; }
-.action-text { color: #edf4fa; font-size: 12px; }
-.primary-text { color: #08271d; font-weight: bold; }
-.detail-title { font-size: 14px; font-weight: bold; color: #edf4fa; margin-bottom: 5px; }
-.detail-coordinate, .detail-metric { width: 100%; height: 22px; align-items: center; justify-content: space-between; }
-.detail-label { color: #7b919f; font-size: 10px; }
-.detail-value { color: #edf4fa; font-size: 12px; }
-.detail-note { width: 100%; color: #a5b7c6; font-size: 10px; text-align: center; margin-top: 4px; lines: 2; }
-.good { color: #7ef7c5; }
-.warning { color: #f2bf68; }
-.muted { color: #7b919f; }
-
-/* Ratio detection covers future narrow GPS devices without API-level-3 queries. */
-.band-page { padding: 38px 16px 38px; }
-.band-status { font-size: 19px; }
-.band-speed { height: 112px; }
-.band-unit-button { height: 46px; width: 190px; }
+<style lang="less">
+@import '../../common/page.less';
+.dashboard { flex: 1; width: 100%; }
+.speed-row { width: 100%; justify-content: center; align-items: center; }
+.speed { width: 100%; height: 82px; font-weight: bold; font-size: 80px; text-align: center; }
+.unit-button { height: 18px; width: 100%; justify-content: center; align-items: center; }
+.unit { font-size: 12px; color: #a5b7c6; }
+.metrics { width: 100%; height: 34px; align-items: center; justify-content: space-between; }
+.metric { flex: 1; flex-direction: column; align-items: center; }
+.metric-label { font-size: 10px; color: #96aeb8; }
+.metric-value { font-size: 22px; font-weight: bold; color: #edf4fa; text-align: center; }
+.metric-divider { height: 22px; width: 1px; background-color: #263b46; }
+.summary { width: 100%; height: 18px; align-items: center; justify-content: space-between; }
+.altitude { font-size: 11px; color: #b8cbd2; }
+.record-state { font-size: 10px; color: #96aeb8; }
+.action { width: 56px; }
+.record-action { width: 64px; }
+.band-unit-button { height: 38px; }
 .band-unit { font-size: 20px; }
-.band-altitude-row { height: 38px; }
-.band-label { font-size: 17px; }
-.band-altitude { font-size: 24px; }
-.band-hint { font-size: 16px; margin-top: 10px; }
-.band-footer { width: 174px; height: 100px; flex-direction: column; align-items: center; }
-.band-action { width: 174px; height: 44px; border-radius: 22px; }
-.band-action-text { font-size: 22px; }
-.band-detail-title { font-size: 24px; margin-bottom: 14px; }
-.band-detail-coordinate { height: 74px; flex-direction: column; justify-content: center; }
-.band-detail-metric { height: 40px; }
-.band-detail-label { font-size: 17px; }
-.band-detail-value { font-size: 22px; }
-.band-detail-note { font-size: 17px; margin-top: 12px; }
+.band-metrics { height: 78px; }
+.band-metric-label { font-size: 16px; }
+.band-metric-value { font-size: 30px; }
+.band-summary { height: 70px; flex-direction: column; justify-content: center; }
+.band-altitude { font-size: 22px; }
+.band-record-state { font-size: 18px; }
 </style>
