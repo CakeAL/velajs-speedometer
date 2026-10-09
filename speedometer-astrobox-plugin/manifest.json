@@ -1,13 +1,19 @@
 {
-    "name": "Blank Template",
-    "icon": "icon.png",
-    "version": "1.0.0",
-    "description": "一个示例 AstroBox 插件",
-    "author": "AstroBox Team",
-    "website": "https://example.com",
-    "entry": "astrobox_ng_plugin_template_rust.wasm",
-    "wasi_version": 2,
-    "api_level": 3,
-    "permissions": ["network"],
-    "additional_files": []
+  "name": "Speedometer GPX",
+  "icon": "icon.png",
+  "version": "0.1.0",
+  "description": "同步速度计手表应用的 GPX 轨迹，支持断点下载、导出和删除。",
+  "author": "cakeal",
+  "website": "https://abox.run/docs/plugin-development/v4/whats-new",
+  "entry": "speedometer_astrobox_plugin.wasm",
+  "wasi_version": 3,
+  "api_level": 4,
+  "permissions": [
+    "device",
+    "interconnect",
+    "ui",
+    "dialog",
+    "timer"
+  ],
+  "additional_files": []
 }
