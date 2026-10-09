@@ -49,17 +49,20 @@ test('write failure stops recording and retains an unfinished file for recovery'
   assert.ok(fs.data.get(tracks[0].uri).endsWith(GPX_END))
 })
 
-test('recovery truncates a partial point and never touches the active recording', async () => {
-  const fs = fakeFiles(); const recorder = createRecorder(fs.api, () => {})
+for (const format of ['full', 'filename', 'double-slash']) {
+test('recovery truncates a partial point and protects the active recording with ' + format + ' URIs', async () => {
+  const fs = fakeFiles(uri => format === 'full' ? uri : format === 'double-slash' ? uri.replace('/track-', '//track-') : uri.split('/').pop())
+  const recorder = createRecorder(fs.api, () => {})
   await recorder.start(100000)
   const active = recorder.snapshot().uri
   const stale = TRACK_DIR + 'track-old.part'
   fs.data.set(stale, fs.data.get(active) + trackPoint(fix, 101000) + '<trkpt lat="3')
-  await recoverTracks(fs.api, active)
+  assert.deepEqual(await recoverTracks(fs.api, active), { recovered: 1, failed: 0 })
   assert.equal(fs.data.has(active), true)
   const text = fs.data.get(stale.replace('.part', '.gpx'))
   assert.ok(text.endsWith(GPX_END)); assert.equal((text.match(/<trkpt /g) || []).length, 1)
 })
+}
 
 test('inspection spans chunk boundaries and long recordings with bounded reads', async () => {
   const fs = fakeFiles(); const recorder = createRecorder(fs.api, () => {})

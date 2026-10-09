@@ -50,8 +50,11 @@ test('reading pages navigate independently, keep their shared session and fit a 
   vm.onHide(); vm.onDestroy(); assert.equal(listeners.size, 0)
 })
 
-test('track page selects an actual GPX and only deletes the chosen file after confirmation', async () => {
-  const fs = fakeFiles(); const recorder = createRecorder(fs.api, () => {})
+for (const format of ['full', 'filename', 'relative', 'double-slash']) {
+test('track page reads and confirms deletion when file.list returns ' + format + ' URIs', async () => {
+  const fs = fakeFiles(uri => format === 'full' ? uri : format === 'double-slash' ? uri.replace('/track-', '//track-') :
+    (format === 'relative' ? 'speedometer/' : '') + uri.split('/').pop())
+  const recorder = createRecorder(fs.api, () => {})
   await recorder.start(100000); const first = await recorder.finish()
   await recorder.start(200000); const second = await recorder.finish()
   let backs = 0; let owners = 0
@@ -67,6 +70,8 @@ test('track page selects an actual GPX and only deletes the chosen file after co
   for (let i = 0; i < 30; i++) await Promise.resolve()
   assert.equal(vm.files.length, 2)
   await vm.selectFile(first); assert.equal(vm.pointCount, '0')
+  assert.equal(vm.selectedName, vm.files.find(item => item.uri === first).label)
+  assert.equal(vm.message, '时间按手表当前时区显示')
   await vm.deleteSelected(); assert.equal(vm.confirmDelete, true); assert.equal(fs.data.has(first), true)
   vm.cancelDelete(); assert.equal(fs.data.has(first), true)
   await vm.deleteSelected(); await vm.deleteSelected()
@@ -76,3 +81,4 @@ test('track page selects an actual GPX and only deletes the chosen file after co
   vm.back(); assert.equal(backs, 1)
   vm.onHide(); vm.onDestroy(); assert.equal(owners, 0)
 })
+}

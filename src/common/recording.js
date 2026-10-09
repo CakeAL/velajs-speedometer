@@ -1,4 +1,4 @@
-import { fileCall, ensureDirectory, TRACK_DIR } from './files'
+import { fileCall, ensureDirectory, listTrackFiles, trackName, TRACK_DIR } from './files'
 
 function ascii(buffer) {
   const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer
@@ -37,7 +37,7 @@ export function createRecorder(api, onChange) {
       state = { ...state, saving: true, message: '正在创建轨迹' }; emit()
       try {
         await ensureDirectory(api)
-        const name = 'track-' + isoTime(now).replace(/:/g, '-').replace(/\.\d+Z$/, '') + '-' + String(now % 1000)
+        const name = trackName(now)
         const uri = TRACK_DIR + name + '.part'
         await fileCall(api, 'writeText', { uri, text: GPX_HEADER + '<metadata><time>' + isoTime(now) +
           '</time></metadata><trk><name>' + name + '</name><trkseg>\n' })
@@ -80,9 +80,8 @@ export function createRecorder(api, onChange) {
 }
 
 export async function recoverTracks(api, activeUri) {
-  await ensureDirectory(api)
-  const result = await fileCall(api, 'list', { uri: TRACK_DIR })
-  const pending = (result.fileList || []).filter(item => /\.part$/.test(item.uri) && item.uri !== activeUri)
+  const entries = await listTrackFiles(api)
+  const pending = entries.filter(item => /\.part$/.test(item.uri) && item.uri !== activeUri)
   let failed = 0
   let recovered = 0
   for (const item of pending) {

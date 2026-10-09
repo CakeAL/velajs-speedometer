@@ -69,14 +69,14 @@ export default {
     if (this.busy) return
     const entry = this.files.filter(item => item.uri === uri)[0]
     if (!entry) return
-    this.selectedUri = uri; this.selectedName = entry.name; this.confirmDelete = false
+    this.selectedUri = uri; this.selectedName = entry.label; this.confirmDelete = false
     this.pointCount = '--'; this.duration = '--'; this.elevation = '--'; this.message = '正在读取轨迹'
     const version = ++this._version
     try {
       const summary = await summarizeTrack(file, uri)
       if (this._destroyed || version !== this._version) return
       this.pointCount = String(summary.points); this.duration = summary.duration; this.elevation = summary.elevation
-      this.message = summary.complete ? '包含 UTC 时间和有效 GPS 坐标' : '文件未完整结束'
+      this.message = summary.complete ? '时间按手表当前时区显示' : '文件未完整结束'
     } catch (error) { if (!this._destroyed && version === this._version) this.message = error.message }
   },
   async deleteSelected() {

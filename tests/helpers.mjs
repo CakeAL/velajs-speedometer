@@ -41,7 +41,7 @@ export function fakeClock() {
     get tasks() { return tasks.size }
   }
 }
-export function fakeFiles() {
+export function fakeFiles(listUri = uri => uri) {
   const data = new Map()
   const writes = []
   let failWrite = false
@@ -60,7 +60,7 @@ export function fakeFiles() {
       o.success({ buffer: new Uint8Array(bytes.subarray(o.position || 0, (o.position || 0) + (o.length || bytes.length))) })
     },
     list(o) { o.success({ fileList: [...data].filter(([uri, text]) => uri.startsWith(o.uri) && text !== null)
-      .map(([uri, text]) => ({ uri, length: Buffer.byteLength(text), lastModifiedTime: 100000 })) }) },
+      .map(([uri, text]) => ({ uri: listUri(uri), length: Buffer.byteLength(text), lastModifiedTime: 100000 })) }) },
     move(o) { if (!data.has(o.srcUri)) { o.fail('', 301); return } data.set(o.dstUri, data.get(o.srcUri)); data.delete(o.srcUri); o.success(o.dstUri) },
     delete(o) { if (!data.has(o.uri)) { o.fail('', 301); return } data.delete(o.uri); o.success({}) }
   }

@@ -5,9 +5,23 @@ import file from '@system.file'
 import storage from '@system.storage'
 import { createSession } from './common/session'
 import { createAppClock } from './common/app-clock'
+import { listTracks, fileCall, TRACK_DIR, trackName } from './common/files'
+import { summarizeTrack } from './common/track-summary'
+import { GPX_HEADER, GPX_END, trackPoint } from './common/recording'
 
 export default {
   onCreate() {
+    ;(async () => {
+      const before = await listTracks(file)
+      console.log('TRACK_SMOKE_LIST ' + JSON.stringify(before))
+      if (before.length) console.log('TRACK_SMOKE_READ ' + JSON.stringify(await summarizeTrack(file, before[0].uri)))
+      console.log('TRACK_SMOKE_NAME ' + trackName(Date.now()))
+      const uri = TRACK_DIR + 'track-smoke-' + Date.now() + '.gpx'
+      await fileCall(file, 'writeText', { uri, text: GPX_HEADER + '<trk><trkseg>' + trackPoint({ latitude: 0, longitude: 0, altitude: 12 }, Date.now()) + GPX_END })
+      console.log('TRACK_SMOKE_FIXTURE ' + JSON.stringify(await summarizeTrack(file, uri)))
+      await fileCall(file, 'delete', { uri })
+      console.log('TRACK_SMOKE_DELETED ' + (await listTracks(file)).length)
+    })().catch(error => console.log('TRACK_SMOKE_ERROR ' + error.message))
     this.clock = createAppClock()
     this.session = createSession({ geolocation, brightness, file, storage }, this.clock)
   },
