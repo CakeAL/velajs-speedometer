@@ -34,7 +34,10 @@
   ],
   "config": {
     "logLevel": "log",
-    "designWidth": 240
+    "designWidth": 240,
+    "background": {
+      "features": ["system.geolocation"]
+    }
   },
   "display": {
     "backgroundColor": "#080d12"

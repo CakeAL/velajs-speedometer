@@ -56,7 +56,7 @@ test('average samples each fresh second including stops, persists and follows th
   await restored.session.dispose(); await h.session.dispose()
 })
 
-test('recording continues across pages, writes once a second and finalizes on app hide', async () => {
+test('recording survives page hide and app background, then finalizes on destruction', async () => {
   const h = harness(); const home = () => {}; const tracks = () => {}
   h.session.acquire(home); h.subscriptions[0].callback(sample)
   await h.session.toggleRecording()
@@ -65,11 +65,22 @@ test('recording continues across pages, writes once a second and finalizes on ap
   h.clock.advance(1000); await settle()
   assert.equal(h.subscriptions.length, 1)
   assert.equal(h.session.snapshot().recording, true)
-  await h.session.suspend()
+  h.session.release(tracks)
+  h.session.suspend()
+  assert.equal(h.session.snapshot().recording, true)
+  assert.equal(h.unsubscribes, 0)
+  assert.equal(h.screen.at(-1), false)
+  for (let i = 0; i < 3; i++) {
+    h.subscriptions[0].callback({ ...sample, longitude: sample.longitude + i * 0.001 })
+    h.clock.advance(1000); await settle()
+  }
+  assert.equal(h.session.snapshot().recording, true)
+  await h.session.dispose()
   assert.equal(h.session.snapshot().recording, false)
+  assert.equal(h.unsubscribes, 1)
   const files = [...h.fs.data].filter(([uri]) => uri.endsWith('.gpx'))
   assert.equal(files.length, 1)
-  assert.equal((files[0][1].match(/<trkpt /g) || []).length, 2)
+  assert.equal((files[0][1].match(/<trkpt /g) || []).length, 5)
   assert.ok(files[0][1].endsWith('</trkseg></trk></gpx>\n'))
   await h.session.dispose()
 })
@@ -81,4 +92,47 @@ test('failed recording is released so the file page can recover its partial GPX'
   assert.equal(h.session.snapshot().recording, false)
   assert.equal(h.session.activeUri(), null)
   await h.session.dispose()
+})
+
+test('screen hold expires after ten seconds without stopping GPS, and recording/retry do not rearm it', async () => {
+  const h = harness(); h.session.acquire(() => {})
+  assert.equal(h.screen.at(-1), true)
+  h.clock.advance(9999); assert.equal(h.screen.at(-1), true)
+  h.clock.advance(1); assert.equal(h.screen.at(-1), false)
+  assert.equal(h.subscriptions.length, 1); assert.equal(h.unsubscribes, 0)
+  await h.session.toggleRecording(); assert.equal(h.screen.at(-1), false)
+  h.subscriptions[0].fail('failed', 1000)
+  h.clock.advance(5000); assert.equal(h.subscriptions.length, 2)
+  assert.equal(h.screen.at(-1), false)
+  await h.session.dispose(); assert.equal(h.clock.tasks, 0)
+})
+
+test('returning from background preserves the recording and stream and starts a new short screen hold', async () => {
+  const h = harness(); const listener = () => {}
+  h.session.acquire(listener); h.subscriptions[0].callback(sample)
+  await h.session.toggleRecording(); const uri = h.session.activeUri()
+  h.session.release(listener); h.session.suspend()
+  h.clock.advance(1000); await settle()
+  assert.equal(h.session.snapshot().recording, true)
+  h.session.resume(); h.session.acquire(listener)
+  assert.equal(h.subscriptions.length, 1); assert.equal(h.session.activeUri(), uri)
+  assert.equal(h.screen.at(-1), true)
+  h.clock.advance(10000); assert.equal(h.screen.at(-1), false)
+  await h.session.toggleRecording(); assert.equal(h.session.snapshot().recording, false)
+  await h.session.dispose()
+})
+
+test('finishing or failing a background recording releases GPS and all session timers', async () => {
+  for (const fail of [false, true]) {
+    const h = harness(); const listener = () => {}
+    h.session.acquire(listener); h.subscriptions[0].callback(sample)
+    await h.session.toggleRecording()
+    h.session.release(listener); h.session.suspend(); h.clock.advance(200)
+    if (fail) { h.fs.failNextWrite(); h.clock.advance(1000); await settle() }
+    else await h.session.toggleRecording()
+    assert.equal(h.session.snapshot().recording, false)
+    assert.equal(h.unsubscribes, 1); assert.equal(h.clock.tasks, 0)
+    assert.equal(h.screen.at(-1), false)
+    await h.session.dispose()
+  }
 })

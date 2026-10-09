@@ -8,6 +8,8 @@ const STATUS = {
   unsupported: 'GPS 接口不可用', error: '失败 · 自动重试'
 }
 
+export const SCREEN_HOLD_MS = 10000
+
 export function createSession(deps, clock) {
   const time = clock || { now: () => Date.now(), setInterval, clearInterval, setTimeout, clearTimeout }
   let state = { phase: 'idle', fix: null, updatedAt: null, message: '请在室外等待 GPS 定位' }
@@ -18,6 +20,7 @@ export function createSession(deps, clock) {
   let tickTimer = null
   let retryTimer = null
   let releaseTimer = null
+  let screenTimer = null
   let lastSecond = null
   let persistenceBusy = false
   let persistencePending = false
@@ -42,9 +45,25 @@ export function createSession(deps, clock) {
       longitudeNumber: readings.longitudeDetail === '--' ? '--' : readings.longitudeDetail.split('°')[0],
       longitudeDirection: readings.longitudeDetail === '--' ? '经度' : (readings.longitudeDetail.indexOf('W') >= 0 ? '西经 W' : '东经 E') }
   }
-  function emit() { const current = view(); listeners.slice().forEach(listener => listener(current)) }
+  function emit() {
+    if (!foreground) return
+    const current = view(); listeners.slice().forEach(listener => listener(current))
+  }
   function keepScreenOn(enabled) {
     try { deps.brightness.setKeepScreenOn({ keepScreenOn: enabled, fail() {} }) } catch (error) { /* Optional on older firmware. */ }
+  }
+  function releaseScreen() {
+    if (screenTimer !== null) time.clearTimeout(screenTimer)
+    screenTimer = null
+    keepScreenOn(false)
+  }
+  function holdScreenBriefly() {
+    if (screenTimer !== null) time.clearTimeout(screenTimer)
+    keepScreenOn(true)
+    screenTimer = time.setTimeout(() => {
+      screenTimer = null
+      keepScreenOn(false)
+    }, SCREEN_HOLD_MS)
   }
   function saveStats() {
     if (!statsReady) return
@@ -58,8 +77,14 @@ export function createSession(deps, clock) {
       fail() { record = { ...record, message: '统计保存失败，请检查存储空间' }; emit(); done() } }) }
     catch (error) { persistenceBusy = false }
   }
-  const recorder = createRecorder(deps.file, next => { record = next; emit() })
-  function wanted() { return foreground && !disposed && (listeners.length > 0 || record.recording || record.saving) }
+  const recorder = createRecorder(deps.file, next => {
+    record = next; emit()
+    // A finished or failed background recording no longer needs GPS keepalive.
+    if (!wanted() && tickTimer !== null) stop()
+  })
+  function wanted() {
+    return !disposed && ((foreground && listeners.length > 0) || record.recording || record.saving)
+  }
   function clearRetry() { if (retryTimer !== null) time.clearTimeout(retryTimer); retryTimer = null }
   function scheduleRetry() {
     if (retryTimer !== null || !wanted()) return
@@ -90,7 +115,6 @@ export function createSession(deps, clock) {
   }
   function start() {
     if (!wanted()) return
-    keepScreenOn(true)
     if (tickTimer === null) tickTimer = time.setInterval(tick, 1000)
     tracker.start()
   }
@@ -98,7 +122,7 @@ export function createSession(deps, clock) {
     clearRetry()
     if (tickTimer !== null) time.clearInterval(tickTimer)
     tickTimer = null
-    keepScreenOn(false)
+    releaseScreen()
     tracker.stop()
     saveStats()
   }
@@ -115,9 +139,12 @@ export function createSession(deps, clock) {
     acquire(listener) {
       if (releaseTimer !== null) time.clearTimeout(releaseTimer)
       releaseTimer = null
+      const visibleAgain = !foreground || listeners.length === 0
       foreground = true
       if (listeners.indexOf(listener) < 0) listeners.push(listener)
-      listener(view()); start()
+      listener(view())
+      if (visibleAgain) holdScreenBriefly()
+      start()
     },
     release(listener) {
       listeners = listeners.filter(item => item !== listener)
@@ -135,18 +162,32 @@ export function createSession(deps, clock) {
       const current = recorder.snapshot()
       return current.recording || current.saving ? current.uri : null
     },
-    async suspend() {
-      foreground = false
-      stop()
-      if (record.recording) {
-        try { await recorder.finish() } catch (error) { /* Recoverable .part is retained. */ }
+    resume() {
+      if (disposed) return
+      const visibleAgain = !foreground
+      foreground = true
+      if (listeners.length > 0) {
+        if (visibleAgain) holdScreenBriefly()
+        start(); emit()
       }
+    },
+    suspend() {
+      foreground = false
+      releaseScreen()
+      // An active geolocation subscription declared as a background feature
+      // keeps the app alive. Keep sampling and writing while recording/saving.
+      if (!wanted()) stop()
+      else saveStats()
     },
     async dispose() {
       disposed = true
       if (releaseTimer !== null) time.clearTimeout(releaseTimer)
       releaseTimer = null
-      await this.suspend()
+      foreground = false
+      stop()
+      if (record.recording) {
+        try { await recorder.finish() } catch (error) { /* Recoverable .part is retained. */ }
+      }
       listeners = []
     }
   }

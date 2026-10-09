@@ -11,6 +11,9 @@ export default {
     this.clock = createAppClock()
     this.session = createSession({ geolocation, brightness, file, storage }, this.clock)
   },
+  onShow() {
+    if (this.session) this.session.resume()
+  },
   onHide() {
     if (this.session) this.session.suspend()
   },
