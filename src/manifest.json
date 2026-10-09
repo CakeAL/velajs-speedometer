@@ -27,6 +27,9 @@
     },
     {
       "name": "system.storage"
+    },
+    {
+      "name": "system.interconnect"
     }
   ],
   "permissions": [

@@ -22,9 +22,9 @@ Xiaomi Vela JS GPS 速度计。
 
 ## 手机导出
 
-按本次用户决定，仅实现本地 GPX 记录与管理，手机导出方式后续确定。当前没有手机上传/导出按钮，也没有配套安卓接收应用或服务器。
+手表端已接入官方 `system.interconnect`，为后续 AstroBox 插件提供 GPX 分页列表、带 CRC32 校验的分块下载、断点重试及删除接口；通信处理在 `app.ux` 创建，切页不会丢失监听。正在记录或保存的文件不能远程下载、删除。插件按包名 `com.cakeal.speedometer` 通信，协议为 `speedometer.gpx` v1。
 
-官方 [interconnect](https://iot.mi.com/vela/quickapp/zh/features/network/interconnect.html) 可发送数据到配套安卓应用，要求两端包名和签名一致；[uploadtask](https://iot.mi.com/vela/quickapp/zh/features/network/uploadtask.html) 上传到开发者服务器，仅部分机型支持。
+完整请求、回复、错误码及 AstroBox 接口对照见 [AstroBox GPX 同步协议](docs/astrobox-gpx-protocol.md)。当前尚未制作可安装的 AstroBox 插件，手机保存/分享与真实蓝牙链路在插件阶段联调；同步前应打开手表应用。没有服务器或手机端上传按钮。
 
 ## 开发与验证
 

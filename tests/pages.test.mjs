@@ -25,6 +25,27 @@ async function mockedModule(path, apis, ux = false) {
   finally { delete globalThis[key] }
 }
 
+test('remote deletion removes the visible track and closes its selected detail', async () => {
+  const fs = fakeFiles(); const recorder = createRecorder(fs.api, () => {})
+  await recorder.start(100000); const uri = await recorder.finish()
+  let listener; let unsubscribed = 0
+  const session = { acquire() {}, release() {}, activeUri: () => null }
+  const trackSync = { subscribe(fn) { listener = fn; return () => { unsubscribed++ } } }
+  const { default: page } = await mockedModule('../src/pages/tracks/tracks.ux', {
+    '@system.file': fs.api,
+    '@system.device': { getInfo(o) { o.success({ screenWidth: 432, screenHeight: 514 }) } },
+    '@system.router': { back() {} }
+  }, true)
+  const vm = { ...page, ...page.private, $app: { $def: { session, trackSync } } }
+  vm.onInit(); vm.onShow()
+  for (let i = 0; i < 30; i++) await Promise.resolve()
+  await vm.selectFile(uri); vm.confirmDelete = true
+  listener(uri.split('/').pop())
+  assert.equal(vm.files.length, 0); assert.equal(vm.selectedUri, ''); assert.equal(vm.confirmDelete, false)
+  assert.equal(vm.message, '文件已通过 AstroBox 删除')
+  vm.onHide(); vm.onDestroy(); assert.equal(unsubscribed, 1)
+})
+
 test('reading pages navigate independently, keep their shared session and fit a round screen', async () => {
   const routes = []; const listeners = new Set()
   const state = { speed: '36', altitude: '13', average: '20.0', maximum: '36.0', unit: 'km/h' }

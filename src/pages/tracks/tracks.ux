@@ -50,9 +50,29 @@ export default {
       const layout = screenLayout(info); this.pageClass = layout.pageClass; this.narrow = layout.narrow
     }, fail() {} })
   },
-  onShow() { this._visible = true; this._session.acquire(this._listener); this.refresh() },
-  onHide() { this._visible = false; this._session.release(this._listener) },
-  onDestroy() { this._destroyed = true; this._version += 1; if (this._visible) this._session.release(this._listener) },
+  onShow() {
+    this._visible = true; this._session.acquire(this._listener)
+    const sync = this.$app.$def.trackSync
+    if (sync && !this._unsubscribeSync) this._unsubscribeSync = sync.subscribe(name => {
+      const entry = this.files.filter(item => item.name === name)[0]
+      if (!entry) return
+      this.files = this.files.filter(item => item.name !== name)
+      if (this.selectedUri === entry.uri) {
+        this._version += 1; this.selectedUri = ''; this.confirmDelete = false
+      }
+      this.message = '文件已通过 AstroBox 删除'
+    })
+    this.refresh()
+  },
+  onHide() {
+    this._visible = false; this._session.release(this._listener)
+    if (this._unsubscribeSync) { this._unsubscribeSync(); this._unsubscribeSync = null }
+  },
+  onDestroy() {
+    this._destroyed = true; this._version += 1
+    if (this._visible) this._session.release(this._listener)
+    if (this._unsubscribeSync) { this._unsubscribeSync(); this._unsubscribeSync = null }
+  },
   async refresh() {
     if (this.busy) return
     this.busy = true; this.message = '正在读取轨迹'

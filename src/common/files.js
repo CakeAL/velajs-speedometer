@@ -22,7 +22,7 @@ export function resolveTrackUri(uri) {
   if (name.indexOf(TRACK_DIR) === 0) name = name.slice(TRACK_DIR.length).replace(/^\/+/, '')
   else if (name.indexOf('speedometer/') === 0) name = name.slice('speedometer/'.length)
   else if (name.indexOf('./') === 0) name = name.slice(2)
-  if (!/^track-[^/\\:?#%]+\.(gpx|part)$/.test(name) || name.indexOf('..') >= 0) return null
+  if (!/^track-[A-Za-z0-9._+-]+\.(gpx|part)$/.test(name) || name.indexOf('..') >= 0) return null
   return TRACK_DIR + name
 }
 
@@ -59,7 +59,7 @@ export function trackLabel(name) {
 export async function listTracks(api) {
   const entries = await listTrackFiles(api)
   return entries.filter(item => /\.gpx$/.test(item.uri))
-    .sort((a, b) => b.lastModifiedTime - a.lastModifiedTime)
+    .sort((a, b) => b.lastModifiedTime - a.lastModifiedTime || (a.uri < b.uri ? -1 : a.uri > b.uri ? 1 : 0))
     .map(item => ({ ...item, name: item.uri.split('/').pop(),
       size: (item.length / 1024).toFixed(1) + ' KB',
       label: trackLabel(item.uri.split('/').pop()) }))
