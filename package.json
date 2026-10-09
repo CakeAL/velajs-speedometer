@@ -9,6 +9,7 @@
     "start": "aiot start --watch",
     "build": "aiot build",
     "release": "aiot release",
+    "test": "node --test tests/*.test.mjs",
     "lint": "eslint --format codeframe --fix --ext .ux,.js src/"
   },
   "lint-staged": {
