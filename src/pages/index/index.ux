@@ -14,16 +14,6 @@
         <text class="label {{narrow ? 'band-label' : ''}}">海拔</text>
         <text class="altitude {{narrow ? 'band-altitude' : ''}}">{{altitude}} m</text>
       </div>
-      <div class="coordinates {{narrow ? 'band-coordinates' : ''}}">
-        <div class="coordinate-row {{narrow ? 'band-coordinate-row' : ''}}">
-          <text class="coordinate-label {{narrow ? 'band-coordinate-label' : ''}}">纬度</text>
-          <text class="coordinate-value {{narrow ? 'band-coordinate-value' : ''}}">{{latitude}}</text>
-        </div>
-        <div class="coordinate-row {{narrow ? 'band-coordinate-row' : ''}}">
-          <text class="coordinate-label {{narrow ? 'band-coordinate-label' : ''}}">经度</text>
-          <text class="coordinate-value {{narrow ? 'band-coordinate-value' : ''}}">{{longitude}}</text>
-        </div>
-      </div>
       <text class="hint {{narrow ? 'band-hint' : ''}}">{{hint}}</text>
     </div>
 
@@ -85,7 +75,7 @@ export default {
     narrow: false,
     details: false,
     speed: '--',
-    speedFont: 58,
+    speedFont: 80,
     unit: 'km/h',
     altitude: '--',
     latitude: '--',
@@ -155,8 +145,9 @@ export default {
     this.detailNote = this._state.phase === 'live' ?
       (this._state.fix && this._state.fix.altitude === null ? '设备未返回海拔' : '海拔与精度由 GPS 提供') : this._state.message
     // Long readings shrink instead of clipping, including after unit conversion.
-    this.speedFont = view.speed.length > 5 ? (this.narrow ? 54 : 40) :
-      (view.speed.length > 4 ? (this.narrow ? 64 : 48) : (this.narrow ? 80 : 58))
+    const speedWidth = this.narrow ? 208 : (this.pageClass === 'rect-page' ? 200 : 184)
+    this.speedFont = Math.min(this.narrow ? 100 : 80,
+      Math.floor(speedWidth / (Math.max(3, view.speed.length) * 0.65)))
   },
 
   changeUnit() {
@@ -236,9 +227,9 @@ export default {
   justify-content: center;
 }
 .speed {
-  height: 62px;
+  height: 86px;
   width: 100%;
-  font-size: 58px;
+  font-size: 80px;
   font-weight: bold;
   color: #7ef7c5;
   text-align: center;
@@ -248,10 +239,6 @@ export default {
 .altitude-row { height: 22px; align-items: center; justify-content: center; }
 .label { font-size: 10px; color: #7b919f; margin-right: 8px; }
 .altitude { font-size: 15px; color: #edf4fa; font-weight: bold; }
-.coordinates { width: 100%; flex-direction: column; margin-top: 2px; }
-.coordinate-row { height: 14px; width: 100%; justify-content: center; align-items: center; }
-.coordinate-label { font-size: 10px; color: #7b919f; margin-right: 10px; }
-.coordinate-value { font-size: 12px; color: #c5cdd5; }
 .hint {
   width: 100%;
   font-size: 9px;
@@ -278,16 +265,12 @@ export default {
 /* Ratio detection covers future narrow GPS devices without API-level-3 queries. */
 .band-page { padding: 38px 16px 38px; }
 .band-status { font-size: 19px; }
-.band-speed { height: 94px; }
+.band-speed { height: 112px; }
 .band-unit-button { height: 46px; width: 190px; }
 .band-unit { font-size: 20px; }
 .band-altitude-row { height: 38px; }
 .band-label { font-size: 17px; }
 .band-altitude { font-size: 24px; }
-.band-coordinates { margin-top: 10px; }
-.band-coordinate-row { height: 62px; flex-direction: column; }
-.band-coordinate-label { font-size: 17px; margin-right: 0; }
-.band-coordinate-value { font-size: 23px; }
 .band-hint { font-size: 16px; margin-top: 10px; }
 .band-footer { width: 174px; height: 100px; flex-direction: column; align-items: center; }
 .band-action { width: 174px; height: 44px; border-radius: 22px; }
