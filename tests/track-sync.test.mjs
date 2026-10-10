@@ -134,6 +134,33 @@ test('native onmessage accepts JSON strings and data envelopes and replies with 
   sync.dispose(); assert.equal(connection.onmessage, null)
 })
 
+test('opening a connection does not discard a request delivered just before onopen', async () => {
+  const { connection, sent, sync } = transport()
+  const pending = connection.onmessage(request('hello'))
+  connection.onopen({ isReconnected: false })
+  await pending
+  assert.equal(sent.length, 1)
+  assert.equal(sent[0].data.ok, true)
+  assert.equal(sync.status(), '手机通信：已回复 hello')
+  sync.dispose()
+})
+
+test('reports receipt and native reply failures without showing GPX contents', async () => {
+  const { connection, sync, sent } = transport(false)
+  const changes = []
+  const unsubscribe = sync.subscribeStatus(value => changes.push(value))
+  const pending = connection.onmessage(request('hello'))
+  await settle()
+  assert.ok(changes.includes('手机通信：收到 hello'))
+  sent[0].fail('private native message', 1006)
+  await pending
+  assert.equal(sync.status(), '手机通信：回复失败 1006')
+  unsubscribe()
+  connection.onclose()
+  assert.equal(changes.at(-1), '手机通信：回复失败 1006')
+  sync.dispose()
+})
+
 test('ignores other protocols, response echoes, malformed JSON and oversized messages', async () => {
   const { connection, sent, sync } = transport()
   for (const event of ['{', JSON.stringify(request('hello', { protocol: 'other' })),

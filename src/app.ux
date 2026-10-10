@@ -16,6 +16,7 @@ export default {
     this.trackSync.start()
   },
   onShow() {
+    if (this.trackSync) this.trackSync.start()
     if (this.session) this.session.resume()
   },
   onHide() {

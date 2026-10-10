@@ -1,13 +1,13 @@
 # AstroBox GPX 同步协议 v1
 
-手表端已在 `app.ux` 注册 `system.interconnect` 消息处理器。后续 AstroBox 插件使用此协议列出、下载、删除已完成 GPX；本仓库目前不包含可安装的 AstroBox 插件。
+手表端已在 `app.ux` 注册 `system.interconnect` 消息处理器。`speedometer-astrobox-plugin/` 中的 Rust API Level 4 插件使用此协议列出、下载、删除已完成 GPX，安装包在其 `dist/` 目录。
 
 ## 连接与生命周期
 
 - 快应用包名：`com.cakeal.speedometer`。
 - 协议名：`speedometer.gpx`，版本：`1`。
 - 手表接收 `connect.onmessage` 的 JSON 字符串，兼容原始对象及 `{data: ...}` 事件包装；回复使用官方的 `connect.send({data: responseObject})`。
-- 插件先订阅该设备、该包名的消息，再发送请求。AstroBox v2 使用 `register-interconnect-recv(deviceAddr, pkgName)` 订阅，`send-qaic-message(deviceAddr, pkgName, JSON字符串)` 发送，接收事件为 `interconnect-message`。插件需要声明 `interconnect` 权限。设备地址和消息事件载荷应按插件所用 SDK/WIT 解包，再解析为下述业务 JSON。
+- 插件先订阅该设备、该包名的消息，再发送请求。本插件使用 AstroBox API Level 4 的 `register-interconnect-recv(deviceAddr, pkgName)` 订阅，`send-qaic-message(deviceAddr, pkgName, JSON字符串)` 发送，接收事件为 `interconnect-message`；这些接口使用原生异步调用。插件需要分别声明 `register_interconnect_recv` 订阅权限和 `interconnect` 发送权限，获取设备还需 `device` 权限。设备地址和消息事件载荷应按插件所用 SDK/WIT 解包，再解析为下述业务 JSON。插件优先解包 `payloadText` / `payload_text`，兼容字符串、对象以及序列化字节数组的事件载荷；保持设备、包名、请求 ID 和操作名检查。回复超时从发送成功后开始计时，不包含宿主授权等待。
 - AstroBox v1 的对应接口为 `interconnect.sendQAICMessage(pkgName, data)`，接收监听器名为 `onQAICMessage_com.cakeal.speedometer`；v1 已被官方标为过时。
 - 同步前打开手表速度计。监听器跟随应用生命周期，切页不销毁；应用被系统停止或销毁后不能应答，需要重新打开后重试。后台录制由 `system.geolocation` 保持，不能仅凭 Interconnect 注册保证未录制时也常驻后台。
 - 不改快应用包名和签名。小米官方安卓配套应用路线要求包名及签名一致；AstroBox 提供其自身 QAIC 通信接口，实际连接、机型兼容及事件包装须通过 AstroBox 插件真机联调确认。当前未声称完成端到端蓝牙验证。

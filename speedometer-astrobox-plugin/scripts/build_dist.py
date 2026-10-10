@@ -3,6 +3,7 @@ import argparse
 import json
 import shutil
 import subprocess
+import struct
 import sys
 import zipfile
 from pathlib import Path
@@ -27,6 +28,24 @@ def load_cargo_metadata(root_dir):
         sys.stderr.write(result.stderr or result.stdout)
         sys.exit(result.returncode)
     return json.loads(result.stdout)
+
+
+def check_runtime_features(root_dir):
+    # These features must be checked on the WASM dependency graph, not the
+    # native unit-test target, which intentionally omits the SDK.
+    result = subprocess.run(
+        ["cargo", "metadata", "--offline", "--format-version", "1",
+         "--filter-platform", "wasm32-wasip2"],
+        cwd=root_dir, capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        sys.exit(result.stderr or "Could not check the WASM dependency graph")
+    metadata = json.loads(result.stdout)
+    nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
+    sdk = next(pkg for pkg in metadata["packages"] if pkg["name"] == "astrobox-ng-wit")
+    binding = next(dep["pkg"] for dep in nodes[sdk["id"]]["deps"] if dep["name"] == "wit_bindgen")
+    if "inter-task-wakeup" in nodes[binding]["features"]:
+        sys.exit("Event-driven v4 sync must not enable inter-task-wakeup: it is incompatible with the host runtime")
 
 
 def pick_root_package(metadata, root_manifest):
@@ -164,12 +183,21 @@ def main():
         sys.exit(1)
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("api_level") != 4 or manifest.get("wasi_version") != 3:
+        sys.exit("Speedometer requires API Level 4 / WASI p3")
+    if "register_interconnect_recv" not in manifest.get("permissions", []):
+        sys.exit("Missing the Interconnect subscription permission")
     plugin_name = manifest.get("name")
     entry = str(manifest.get("entry") or "")
     icon = str(manifest.get("icon") or "")
     additional = manifest.get("additional_files") or []
 
+    icon_data = (root_dir / icon).read_bytes()
+    if icon_data[:8] != b"\x89PNG\r\n\x1a\n" or struct.unpack(">II", icon_data[16:24]) != (512, 512):
+        sys.exit("The plugin icon must be a 512x512 PNG")
+
     run_cargo_build(root_dir, cargo_args)
+    check_runtime_features(root_dir)
 
     metadata = load_cargo_metadata(root_dir)
     target_dir = Path(metadata.get("target_directory", root_dir / "target"))
@@ -190,6 +218,12 @@ def main():
             f"{entry_name or crate_name or '*.wasm'} in {target_dir}\n"
         )
         sys.exit(1)
+
+    wasm_data = wasm_path.read_bytes()
+    if wasm_data[:8] != b"\x00asm\x0d\x00\x01\x00" or b"astrobox:psys-host-v4/" not in wasm_data:
+        sys.exit("The build must be a WebAssembly Component using the v4 host namespace")
+    if b"astrobox:psys-plugin-v4/" not in wasm_data or b"astrobox:psys-host/" in wasm_data:
+        sys.exit("The plugin exports must use API Level 4; old host imports are not allowed")
 
     dist_dir = root_dir / "dist"
     dist_dir.mkdir(parents=True, exist_ok=True)

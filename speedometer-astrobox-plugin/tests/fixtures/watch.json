@@ -1,0 +1,152 @@
+{
+  "hello": {
+    "protocol": "speedometer.gpx",
+    "version": 1,
+    "id": "fixture-1",
+    "op": "hello",
+    "ok": true,
+    "result": {
+      "package": "com.cakeal.speedometer",
+      "operations": [
+        "hello",
+        "list",
+        "read",
+        "delete"
+      ],
+      "chunkBytes": 768,
+      "pageSize": 4
+    }
+  },
+  "list": {
+    "protocol": "speedometer.gpx",
+    "version": 1,
+    "id": "fixture-2",
+    "op": "list",
+    "ok": true,
+    "result": {
+      "files": [
+        {
+          "name": "track-2026-10-09T19-33-50-183+0800.gpx",
+          "bytes": 3058,
+          "modifiedAt": 100000,
+          "displayTime": "2026-10-09 19:33:50",
+          "etag": "3058:100000"
+        }
+      ],
+      "total": 1,
+      "nextOffset": null
+    }
+  },
+  "chunks": [
+    {
+      "protocol": "speedometer.gpx",
+      "version": 1,
+      "id": "fixture-3",
+      "op": "read",
+      "ok": true,
+      "result": {
+        "name": "track-2026-10-09T19-33-50-183+0800.gpx",
+        "etag": "3058:100000",
+        "offset": 0,
+        "nextOffset": 768,
+        "total": 3058,
+        "bytes": 768,
+        "eof": false,
+        "encoding": "base64",
+        "data": "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPGdweCB2ZXJzaW9uPSIxLjEiPjx0cms+PG5hbWU+5ZCr5rW35ouU55qE6L2o6L+5PC9uYW1lPjx0cmtzZWc+Cjx0cmtwdCBsYXQ9IjMxLjAwMDAwMCIgbG9uPSIxMjEuNTAwMDAwIj48ZWxlPi0xMi41MDwvZWxlPjx0aW1lPjIwMjYtMTAtMDlUMTE6MzM6MDBaPC90aW1lPjwvdHJrcHQ+Cjx0cmtwdCBsYXQ9IjMxLjAwMDAwMSIgbG9uPSIxMjEuNTAwMDAwIj48ZWxlPi0xMS41MDwvZWxlPjx0aW1lPjIwMjYtMTAtMDlUMTE6MzM6MDFaPC90aW1lPjwvdHJrcHQ+Cjx0cmtwdCBsYXQ9IjMxLjAwMDAwMiIgbG9uPSIxMjEuNTAwMDAwIj48ZWxlPi0xMC41MDwvZWxlPjx0aW1lPjIwMjYtMTAtMDlUMTE6MzM6MDJaPC90aW1lPjwvdHJrcHQ+Cjx0cmtwdCBsYXQ9IjMxLjAwMDAwMyIgbG9uPSIxMjEuNTAwMDAwIj48ZWxlPi05LjUwPC9lbGU+PHRpbWU+MjAyNi0xMC0wOVQxMTozMzowM1o8L3RpbWU+PC90cmtwdD4KPHRya3B0IGxhdD0iMzEuMDAwMDA0IiBsb249IjEyMS41MDAwMDAiPjxlbGU+LTguNTA8L2VsZT48dGltZT4yMDI2LTEwLTA5VDExOjMzOjA0WjwvdGltZT48L3Rya3B0Pgo8dHJrcHQgbGF0PSIzMS4wMDAwMDUiIGxvbj0iMTIxLjUwMDAwMCI+PGVsZT4tNy41MDwvZWxlPjx0aW1lPjIwMjYtMTAtMDlUMTE6MzM6MDVaPC90aW1lPjwvdHJrcHQ+Cjx0cmtwdCBsYXQ9IjMxLjAwMDAwNiIgbG9uPSIxMjEuNTAwMDAwIj48ZWxlPi02LjUwPC9lbGU+PHRpbWU+MjAyNi0xMC0wOVQx",
+        "crc32": "7106ea83"
+      }
+    },
+    {
+      "protocol": "speedometer.gpx",
+      "version": 1,
+      "id": "fixture-4",
+      "op": "read",
+      "ok": true,
+      "result": {
+        "name": "track-2026-10-09T19-33-50-183+0800.gpx",
+        "etag": "3058:100000",
+        "offset": 768,
+        "nextOffset": 1536,
+        "total": 3058,
+        "bytes": 768,
+        "eof": false,
+        "encoding": "base64",
+        "data": "MTozMzowNlo8L3RpbWU+PC90cmtwdD4KPHRya3B0IGxhdD0iMzEuMDAwMDA3IiBsb249IjEyMS41MDAwMDAiPjxlbGU+LTUuNTA8L2VsZT48dGltZT4yMDI2LTEwLTA5VDExOjMzOjA3WjwvdGltZT48L3Rya3B0Pgo8dHJrcHQgbGF0PSIzMS4wMDAwMDgiIGxvbj0iMTIxLjUwMDAwMCI+PGVsZT4tNC41MDwvZWxlPjx0aW1lPjIwMjYtMTAtMDlUMTE6MzM6MDhaPC90aW1lPjwvdHJrcHQ+Cjx0cmtwdCBsYXQ9IjMxLjAwMDAwOSIgbG9uPSIxMjEuNTAwMDAwIj48ZWxlPi0zLjUwPC9lbGU+PHRpbWU+MjAyNi0xMC0wOVQxMTozMzowOVo8L3RpbWU+PC90cmtwdD4KPHRya3B0IGxhdD0iMzEuMDAwMDEwIiBsb249IjEyMS41MDAwMDAiPjxlbGU+LTIuNTA8L2VsZT48dGltZT4yMDI2LTEwLTA5VDExOjMzOjEwWjwvdGltZT48L3Rya3B0Pgo8dHJrcHQgbGF0PSIzMS4wMDAwMTEiIGxvbj0iMTIxLjUwMDAwMCI+PGVsZT4tMS41MDwvZWxlPjx0aW1lPjIwMjYtMTAtMDlUMTE6MzM6MTFaPC90aW1lPjwvdHJrcHQ+Cjx0cmtwdCBsYXQ9IjMxLjAwMDAxMiIgbG9uPSIxMjEuNTAwMDAwIj48ZWxlPjAuNTA8L2VsZT48dGltZT4yMDI2LTEwLTA5VDExOjMzOjEyWjwvdGltZT48L3Rya3B0Pgo8dHJrcHQgbGF0PSIzMS4wMDAwMTMiIGxvbj0iMTIxLjUwMDAwMCI+PGVsZT4xLjUwPC9lbGU+PHRpbWU+MjAyNi0xMC0wOVQxMTozMzoxM1o8L3RpbWU+PC90cmtwdD4KPHRya3B0IGxhdD0iMzEuMDAwMDE0IiBsb249IjEyMS41MDAwMDAiPjxlbGU+Mi41MDwvZWxlPjx0aW1l",
+        "crc32": "e9153fe7"
+      }
+    },
+    {
+      "protocol": "speedometer.gpx",
+      "version": 1,
+      "id": "fixture-5",
+      "op": "read",
+      "ok": true,
+      "result": {
+        "name": "track-2026-10-09T19-33-50-183+0800.gpx",
+        "etag": "3058:100000",
+        "offset": 1536,
+        "nextOffset": 2304,
+        "total": 3058,
+        "bytes": 768,
+        "eof": false,
+        "encoding": "base64",
+        "data": "PjIwMjYtMTAtMDlUMTE6MzM6MTRaPC90aW1lPjwvdHJrcHQ+Cjx0cmtwdCBsYXQ9IjMxLjAwMDAxNSIgbG9uPSIxMjEuNTAwMDAwIj48ZWxlPjMuNTA8L2VsZT48dGltZT4yMDI2LTEwLTA5VDExOjMzOjE1WjwvdGltZT48L3Rya3B0Pgo8dHJrcHQgbGF0PSIzMS4wMDAwMTYiIGxvbj0iMTIxLjUwMDAwMCI+PGVsZT40LjUwPC9lbGU+PHRpbWU+MjAyNi0xMC0wOVQxMTozMzoxNlo8L3RpbWU+PC90cmtwdD4KPHRya3B0IGxhdD0iMzEuMDAwMDE3IiBsb249IjEyMS41MDAwMDAiPjxlbGU+NS41MDwvZWxlPjx0aW1lPjIwMjYtMTAtMDlUMTE6MzM6MTdaPC90aW1lPjwvdHJrcHQ+Cjx0cmtwdCBsYXQ9IjMxLjAwMDAxOCIgbG9uPSIxMjEuNTAwMDAwIj48ZWxlPjYuNTA8L2VsZT48dGltZT4yMDI2LTEwLTA5VDExOjMzOjE4WjwvdGltZT48L3Rya3B0Pgo8dHJrcHQgbGF0PSIzMS4wMDAwMTkiIGxvbj0iMTIxLjUwMDAwMCI+PGVsZT43LjUwPC9lbGU+PHRpbWU+MjAyNi0xMC0wOVQxMTozMzoxOVo8L3RpbWU+PC90cmtwdD4KPHRya3B0IGxhdD0iMzEuMDAwMDIwIiBsb249IjEyMS41MDAwMDAiPjxlbGU+OC41MDwvZWxlPjx0aW1lPjIwMjYtMTAtMDlUMTE6MzM6MjBaPC90aW1lPjwvdHJrcHQ+Cjx0cmtwdCBsYXQ9IjMxLjAwMDAyMSIgbG9uPSIxMjEuNTAwMDAwIj48ZWxlPjkuNTA8L2VsZT48dGltZT4yMDI2LTEwLTA5VDExOjMzOjIxWjwvdGltZT48L3Rya3B0Pgo8dHJrcHQgbGF0PSIzMS4wMDAwMjIiIGxvbj0iMTIxLjUwMDAwMCI+PGVsZT4xMC41MDwv",
+        "crc32": "37e95664"
+      }
+    },
+    {
+      "protocol": "speedometer.gpx",
+      "version": 1,
+      "id": "fixture-6",
+      "op": "read",
+      "ok": true,
+      "result": {
+        "name": "track-2026-10-09T19-33-50-183+0800.gpx",
+        "etag": "3058:100000",
+        "offset": 2304,
+        "nextOffset": 3058,
+        "total": 3058,
+        "bytes": 754,
+        "eof": true,
+        "encoding": "base64",
+        "data": "ZWxlPjx0aW1lPjIwMjYtMTAtMDlUMTE6MzM6MjJaPC90aW1lPjwvdHJrcHQ+Cjx0cmtwdCBsYXQ9IjMxLjAwMDAyMyIgbG9uPSIxMjEuNTAwMDAwIj48ZWxlPjExLjUwPC9lbGU+PHRpbWU+MjAyNi0xMC0wOVQxMTozMzoyM1o8L3RpbWU+PC90cmtwdD4KPHRya3B0IGxhdD0iMzEuMDAwMDI0IiBsb249IjEyMS41MDAwMDAiPjxlbGU+MTIuNTA8L2VsZT48dGltZT4yMDI2LTEwLTA5VDExOjMzOjI0WjwvdGltZT48L3Rya3B0Pgo8dHJrcHQgbGF0PSIzMS4wMDAwMjUiIGxvbj0iMTIxLjUwMDAwMCI+PGVsZT4xMy41MDwvZWxlPjx0aW1lPjIwMjYtMTAtMDlUMTE6MzM6MjVaPC90aW1lPjwvdHJrcHQ+Cjx0cmtwdCBsYXQ9IjMxLjAwMDAyNiIgbG9uPSIxMjEuNTAwMDAwIj48ZWxlPjE0LjUwPC9lbGU+PHRpbWU+MjAyNi0xMC0wOVQxMTozMzoyNlo8L3RpbWU+PC90cmtwdD4KPHRya3B0IGxhdD0iMzEuMDAwMDI3IiBsb249IjEyMS41MDAwMDAiPjxlbGU+MTUuNTA8L2VsZT48dGltZT4yMDI2LTEwLTA5VDExOjMzOjI3WjwvdGltZT48L3Rya3B0Pgo8dHJrcHQgbGF0PSIzMS4wMDAwMjgiIGxvbj0iMTIxLjUwMDAwMCI+PGVsZT4xNi41MDwvZWxlPjx0aW1lPjIwMjYtMTAtMDlUMTE6MzM6MjhaPC90aW1lPjwvdHJrcHQ+Cjx0cmtwdCBsYXQ9IjMxLjAwMDAyOSIgbG9uPSIxMjEuNTAwMDAwIj48ZWxlPjE3LjUwPC9lbGU+PHRpbWU+MjAyNi0xMC0wOVQxMTozMzoyOVo8L3RpbWU+PC90cmtwdD4KPC90cmtzZWc+PC90cms+PC9ncHg+Cg==",
+        "crc32": "ad32b38a"
+      }
+    }
+  ],
+  "changed": {
+    "protocol": "speedometer.gpx",
+    "version": 1,
+    "id": "fixture-7",
+    "op": "read",
+    "ok": false,
+    "error": {
+      "code": "FILE_CHANGED",
+      "message": "文件已变化，请刷新列表"
+    }
+  },
+  "deleted": {
+    "protocol": "speedometer.gpx",
+    "version": 1,
+    "id": "fixture-8",
+    "op": "delete",
+    "ok": true,
+    "result": {
+      "name": "track-2026-10-09T19-33-50-183+0800.gpx",
+      "deleted": true
+    }
+  },
+  "deletedAgain": {
+    "protocol": "speedometer.gpx",
+    "version": 1,
+    "id": "fixture-9",
+    "op": "delete",
+    "ok": true,
+    "result": {
+      "name": "track-2026-10-09T19-33-50-183+0800.gpx",
+      "deleted": false
+    }
+  },
+  "gpx": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<gpx version=\"1.1\"><trk><name>含海拔的轨迹</name><trkseg>\n<trkpt lat=\"31.000000\" lon=\"121.500000\"><ele>-12.50</ele><time>2026-10-09T11:33:00Z</time></trkpt>\n<trkpt lat=\"31.000001\" lon=\"121.500000\"><ele>-11.50</ele><time>2026-10-09T11:33:01Z</time></trkpt>\n<trkpt lat=\"31.000002\" lon=\"121.500000\"><ele>-10.50</ele><time>2026-10-09T11:33:02Z</time></trkpt>\n<trkpt lat=\"31.000003\" lon=\"121.500000\"><ele>-9.50</ele><time>2026-10-09T11:33:03Z</time></trkpt>\n<trkpt lat=\"31.000004\" lon=\"121.500000\"><ele>-8.50</ele><time>2026-10-09T11:33:04Z</time></trkpt>\n<trkpt lat=\"31.000005\" lon=\"121.500000\"><ele>-7.50</ele><time>2026-10-09T11:33:05Z</time></trkpt>\n<trkpt lat=\"31.000006\" lon=\"121.500000\"><ele>-6.50</ele><time>2026-10-09T11:33:06Z</time></trkpt>\n<trkpt lat=\"31.000007\" lon=\"121.500000\"><ele>-5.50</ele><time>2026-10-09T11:33:07Z</time></trkpt>\n<trkpt lat=\"31.000008\" lon=\"121.500000\"><ele>-4.50</ele><time>2026-10-09T11:33:08Z</time></trkpt>\n<trkpt lat=\"31.000009\" lon=\"121.500000\"><ele>-3.50</ele><time>2026-10-09T11:33:09Z</time></trkpt>\n<trkpt lat=\"31.000010\" lon=\"121.500000\"><ele>-2.50</ele><time>2026-10-09T11:33:10Z</time></trkpt>\n<trkpt lat=\"31.000011\" lon=\"121.500000\"><ele>-1.50</ele><time>2026-10-09T11:33:11Z</time></trkpt>\n<trkpt lat=\"31.000012\" lon=\"121.500000\"><ele>0.50</ele><time>2026-10-09T11:33:12Z</time></trkpt>\n<trkpt lat=\"31.000013\" lon=\"121.500000\"><ele>1.50</ele><time>2026-10-09T11:33:13Z</time></trkpt>\n<trkpt lat=\"31.000014\" lon=\"121.500000\"><ele>2.50</ele><time>2026-10-09T11:33:14Z</time></trkpt>\n<trkpt lat=\"31.000015\" lon=\"121.500000\"><ele>3.50</ele><time>2026-10-09T11:33:15Z</time></trkpt>\n<trkpt lat=\"31.000016\" lon=\"121.500000\"><ele>4.50</ele><time>2026-10-09T11:33:16Z</time></trkpt>\n<trkpt lat=\"31.000017\" lon=\"121.500000\"><ele>5.50</ele><time>2026-10-09T11:33:17Z</time></trkpt>\n<trkpt lat=\"31.000018\" lon=\"121.500000\"><ele>6.50</ele><time>2026-10-09T11:33:18Z</time></trkpt>\n<trkpt lat=\"31.000019\" lon=\"121.500000\"><ele>7.50</ele><time>2026-10-09T11:33:19Z</time></trkpt>\n<trkpt lat=\"31.000020\" lon=\"121.500000\"><ele>8.50</ele><time>2026-10-09T11:33:20Z</time></trkpt>\n<trkpt lat=\"31.000021\" lon=\"121.500000\"><ele>9.50</ele><time>2026-10-09T11:33:21Z</time></trkpt>\n<trkpt lat=\"31.000022\" lon=\"121.500000\"><ele>10.50</ele><time>2026-10-09T11:33:22Z</time></trkpt>\n<trkpt lat=\"31.000023\" lon=\"121.500000\"><ele>11.50</ele><time>2026-10-09T11:33:23Z</time></trkpt>\n<trkpt lat=\"31.000024\" lon=\"121.500000\"><ele>12.50</ele><time>2026-10-09T11:33:24Z</time></trkpt>\n<trkpt lat=\"31.000025\" lon=\"121.500000\"><ele>13.50</ele><time>2026-10-09T11:33:25Z</time></trkpt>\n<trkpt lat=\"31.000026\" lon=\"121.500000\"><ele>14.50</ele><time>2026-10-09T11:33:26Z</time></trkpt>\n<trkpt lat=\"31.000027\" lon=\"121.500000\"><ele>15.50</ele><time>2026-10-09T11:33:27Z</time></trkpt>\n<trkpt lat=\"31.000028\" lon=\"121.500000\"><ele>16.50</ele><time>2026-10-09T11:33:28Z</time></trkpt>\n<trkpt lat=\"31.000029\" lon=\"121.500000\"><ele>17.50</ele><time>2026-10-09T11:33:29Z</time></trkpt>\n</trkseg></trk></gpx>\n"
+}

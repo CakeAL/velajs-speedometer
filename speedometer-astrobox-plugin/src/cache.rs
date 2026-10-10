@@ -84,19 +84,16 @@ impl Cache {
         });
         Ok(entries)
     }
-    pub fn complete(&self, track: &Track) -> bool {
-        self.entries().unwrap_or_default().iter().any(|e| {
-            e.complete
-                && e.track.name == track.name
-                && e.track.etag == track.etag
-                && e.track.bytes == track.bytes
-        })
-    }
     pub fn open_complete(&self, track: &Track) -> Result<File, String> {
         let entry = self
             .entries()?
             .into_iter()
-            .find(|e| e.complete && e.track == *track)
+            .find(|e| {
+                e.complete
+                    && e.track.name == track.name
+                    && e.track.etag == track.etag
+                    && e.track.bytes == track.bytes
+            })
             .ok_or("该轨迹尚未下载完成")?;
         let mut file = File::open(self.path(&track.name, "")?).map_err(io_error)?;
         let (len, hash) = hash_file(&mut file, None)?;
@@ -124,13 +121,13 @@ impl Cache {
             .map_err(io_error)?;
         let mut hash = crc32fast::Hasher::new();
         let mut offset = 0;
-        if let Some(entry) = previous {
-            if let Ok((len, candidate)) = hash_file(&mut file, Some(entry.offset)) {
-                if len == entry.offset && candidate.clone().finalize() == entry.crc32 {
-                    offset = entry.offset;
-                    hash = candidate;
-                }
-            }
+        if let Some(entry) = previous
+            && let Ok((len, candidate)) = hash_file(&mut file, Some(entry.offset))
+            && len == entry.offset
+            && candidate.clone().finalize() == entry.crc32
+        {
+            offset = entry.offset;
+            hash = candidate;
         }
         // A crash can leave bytes beyond the committed checkpoint; never append those twice.
         file.set_len(offset).map_err(io_error)?;

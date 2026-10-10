@@ -97,25 +97,35 @@ pub fn decode_reply(payload: &str, expected_addr: &str) -> Option<Reply> {
             value = serde_json::from_str(text).ok()?;
             continue;
         }
+        // CoreEvent::InterconnectMessage carries Vec<u8>. When the host forwards
+        // its serialized envelope, payload is an array rather than a JSON string.
+        if let Some(array) = value.as_array() {
+            let bytes: Vec<u8> = array
+                .iter()
+                .map(|v| v.as_u64().and_then(|n| u8::try_from(n).ok()))
+                .collect::<Option<_>>()?;
+            value = serde_json::from_slice(&bytes).ok()?;
+            continue;
+        }
         let obj = value.as_object()?;
         for key in ["addr", "device_addr", "deviceAddr"] {
-            if let Some(addr) = obj.get(key).and_then(Value::as_str) {
-                if addr != expected_addr {
-                    return None;
-                }
+            if let Some(addr) = obj.get(key).and_then(Value::as_str)
+                && addr != expected_addr
+            {
+                return None;
             }
         }
         for key in ["pkg_name", "pkgName", "package_name", "packageName"] {
-            if let Some(pkg) = obj.get(key).and_then(Value::as_str) {
-                if pkg != PACKAGE {
-                    return None;
-                }
+            if let Some(pkg) = obj.get(key).and_then(Value::as_str)
+                && pkg != PACKAGE
+            {
+                return None;
             }
         }
         if obj.contains_key("protocol") {
             return serde_json::from_value(value).ok();
         }
-        value = ["data", "payload", "message"]
+        value = ["payloadText", "payload_text", "data", "payload", "message"]
             .into_iter()
             .find_map(|key| obj.get(key))
             .cloned()?;
@@ -123,15 +133,52 @@ pub fn decode_reply(payload: &str, expected_addr: &str) -> Option<Reply> {
     None
 }
 
+/// Describe only the encoding, never the location, filenames or message text.
+pub fn message_shape(payload: &str) -> String {
+    let Ok(mut value) = serde_json::from_str::<Value>(payload) else {
+        return "非 JSON 数据".into();
+    };
+    let mut shape = String::new();
+    for _ in 0..8 {
+        if value.is_string() {
+            shape.push_str("字符串");
+            break;
+        }
+        if let Some(array) = value.as_array() {
+            shape.push_str(&format!("字节数组({})", array.len()));
+            break;
+        }
+        if value.is_object() {
+            shape.push_str("对象");
+            if value.get("protocol").is_some() {
+                shape.push_str("(协议消息)");
+                break;
+            }
+            let next = ["payloadText", "payload_text", "data", "payload", "message"]
+                .into_iter()
+                .find_map(|k| value.get(k).map(|v| (k, v.clone())));
+            if let Some((key, nested)) = next {
+                shape.push_str(&format!(".{key} → "));
+                value = nested;
+                continue;
+            }
+            break;
+        }
+        shape.push_str("其他数据类型");
+        break;
+    }
+    shape
+}
+
 pub fn event_value(payload: &str) -> String {
     let mut value = serde_json::from_str::<Value>(payload).unwrap_or(Value::String(payload.into()));
     for _ in 0..6 {
         if let Some(text) = value.as_str() {
-            if let Ok(nested) = serde_json::from_str::<Value>(text) {
-                if nested != value {
-                    value = nested;
-                    continue;
-                }
+            if let Ok(nested) = serde_json::from_str::<Value>(text)
+                && nested != value
+            {
+                value = nested;
+                continue;
             }
             return text.into();
         }
@@ -299,6 +346,80 @@ mod tests {
         assert!(!reply.matches("stale", "hello"));
         assert!(decode_reply(&wrapped.to_string(), "other").is_none());
         assert!(decode_reply("malformed", "watch").is_none());
+    }
+    #[test]
+    fn decodes_core_byte_payloads_and_nested_utf8_messages() {
+        let response = json!({"protocol":PROTOCOL,"version":1,"id":"req-1","op":"hello","ok":true,"result":{"note":"已连接"}});
+        let bytes = response.to_string().into_bytes();
+        for payload in [
+            json!(bytes),
+            json!({"device_addr":"watch","pkg_name":PACKAGE,"payload":bytes}),
+            json!({"data":{"deviceAddr":"watch","pkgName":PACKAGE,"payload":bytes}}),
+            json!(json!({"device_addr":"watch","pkg_name":PACKAGE,"payload":bytes}).to_string()),
+        ] {
+            let reply = decode_reply(&payload.to_string(), "watch").unwrap();
+            assert!(reply.matches("req-1", "hello"));
+            assert_eq!(reply.result().unwrap()["note"], "已连接");
+        }
+        assert!(
+            decode_reply(
+                &json!({"device_addr":"other","payload":bytes}).to_string(),
+                "watch"
+            )
+            .is_none()
+        );
+        assert!(
+            decode_reply(
+                &json!({"pkg_name":"other","payload":bytes}).to_string(),
+                "watch"
+            )
+            .is_none()
+        );
+    }
+    #[test]
+    fn decodes_astrobox_payload_text_before_the_binary_payload() {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/watch.json")).unwrap();
+        for reply in std::iter::once(&fixture["hello"])
+            .chain(std::iter::once(&fixture["list"]))
+            .chain(fixture["chunks"].as_array().unwrap().iter())
+        {
+            for key in ["payloadText", "payload_text"] {
+                let mut envelope =
+                    json!({"deviceAddr":"watch","pkgName":PACKAGE,"payload":"opaque-binary-data"});
+                envelope[key] = json!(reply.to_string());
+                let decoded = decode_reply(&envelope.to_string(), "watch").unwrap();
+                assert!(
+                    decoded.matches(reply["id"].as_str().unwrap(), reply["op"].as_str().unwrap())
+                );
+                assert_eq!(decoded.result().unwrap(), reply["result"]);
+                assert!(decode_reply(&envelope.to_string(), "other-watch").is_none());
+                envelope["pkgName"] = json!("another.app");
+                assert!(decode_reply(&envelope.to_string(), "watch").is_none());
+            }
+        }
+    }
+    #[test]
+    fn rejects_invalid_byte_arrays_without_truncating_or_panicking() {
+        for payload in [
+            json!([256]),
+            json!([-1]),
+            json!([1.5]),
+            json!(["123"]),
+            json!([255]),
+            json!([]),
+        ] {
+            assert!(decode_reply(&payload.to_string(), "watch").is_none());
+        }
+    }
+    #[test]
+    fn diagnostic_shape_does_not_expose_message_content() {
+        let data = json!({"device_addr":"private-address","payload":[1,2,3]});
+        assert_eq!(
+            message_shape(&data.to_string()),
+            "对象.payload → 字节数组(3)"
+        );
+        assert_eq!(message_shape("secret-location"), "非 JSON 数据");
     }
     #[test]
     fn rejects_nonadvancing_pagination() {

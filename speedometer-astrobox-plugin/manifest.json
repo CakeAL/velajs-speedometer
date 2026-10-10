@@ -11,6 +11,7 @@
   "permissions": [
     "device",
     "interconnect",
+    "register_interconnect_recv",
     "ui",
     "dialog",
     "timer"

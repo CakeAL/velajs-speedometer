@@ -13,6 +13,7 @@
       </list-item>
     </list>
     <list else class="file-list">
+      <list-item type="connection" class="list-message"><text class="hint {{narrow ? 'band-hint' : ''}}">{{syncStatus}}</text></list-item>
       <list-item type="empty" if="{{files.length === 0}}" class="empty"><text class="hint {{narrow ? 'band-hint' : ''}}">{{message || '暂无轨迹，点击首页的记录开始'}}</text></list-item>
       <list-item type="track" for="{{files}}" tid="uri" class="file-item {{narrow ? 'band-file-item' : ''}}" onclick="selectFile($item.uri)">
         <text class="file-name {{narrow ? 'band-file-name' : ''}}">{{$item.label}}</text>
@@ -38,7 +39,7 @@ import { summarizeTrack } from '../../common/track-summary'
 export default {
   private: {
     pageClass: 'round-page', narrow: false, files: [], selectedUri: '', selectedName: '',
-    pointCount: '--', duration: '--', elevation: '--', message: '', confirmDelete: false, busy: false
+    pointCount: '--', duration: '--', elevation: '--', message: '', syncStatus: '', confirmDelete: false, busy: false
   },
   onInit() {
     this._destroyed = false
@@ -53,6 +54,9 @@ export default {
   onShow() {
     this._visible = true; this._session.acquire(this._listener)
     const sync = this.$app.$def.trackSync
+    if (sync && sync.subscribeStatus && !this._unsubscribeStatus) this._unsubscribeStatus = sync.subscribeStatus(status => {
+      if (!this._destroyed) this.syncStatus = status
+    })
     if (sync && !this._unsubscribeSync) this._unsubscribeSync = sync.subscribe(name => {
       const entry = this.files.filter(item => item.name === name)[0]
       if (!entry) return
@@ -66,10 +70,12 @@ export default {
   },
   onHide() {
     this._visible = false; this._session.release(this._listener)
+    if (this._unsubscribeStatus) { this._unsubscribeStatus(); this._unsubscribeStatus = null }
     if (this._unsubscribeSync) { this._unsubscribeSync(); this._unsubscribeSync = null }
   },
   onDestroy() {
     this._destroyed = true; this._version += 1
+    if (this._unsubscribeStatus) { this._unsubscribeStatus(); this._unsubscribeStatus = null }
     if (this._visible) this._session.release(this._listener)
     if (this._unsubscribeSync) { this._unsubscribeSync(); this._unsubscribeSync = null }
   },
