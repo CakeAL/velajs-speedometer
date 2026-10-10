@@ -8,17 +8,22 @@
       <list-item type="speed" class="speed-row" style="height: {{speedHeight}}px;">
         <text class="speed {{tone}}" style="font-size: {{speedFont}}px; height: {{speedHeight}}px;">{{speed}}</text>
       </list-item>
-      <list-item type="unit" class="unit-button {{narrow ? 'band-unit-button' : ''}}" onclick="changeUnit"><text class="unit {{narrow ? 'band-unit' : ''}}">{{unit}} · 切换</text></list-item>
-      <list-item type="stats" class="metrics {{narrow ? 'band-metrics' : ''}}">
-        <div class="metric"><text class="metric-label {{narrow ? 'band-metric-label' : ''}}">历史平均</text><text class="metric-value {{narrow ? 'band-metric-value' : ''}}">{{average}}</text></div>
+      <list-item type="unit" class="unit-button" style="height: {{unitHeight}}px;" onclick="changeUnit"><text class="unit {{narrow ? 'band-unit' : ''}}">{{unit}} · 切换</text></list-item>
+      <list-item type="stats" class="metrics" style="height: {{metricsHeight}}px;">
+        <div class="metric"><text class="metric-label {{narrow ? 'band-metric-label' : ''}}">本次平均</text><text class="metric-value {{narrow ? 'band-metric-value' : ''}}">{{average}}</text></div>
         <div class="metric-divider"></div>
-        <div class="metric"><text class="metric-label {{narrow ? 'band-metric-label' : ''}}">历史最高</text><text class="metric-value {{narrow ? 'band-metric-value' : ''}}">{{maximum}}</text></div>
+        <div class="metric"><text class="metric-label {{narrow ? 'band-metric-label' : ''}}">本次最高</text><text class="metric-value {{narrow ? 'band-metric-value' : ''}}">{{maximum}}</text></div>
       </list-item>
-      <list-item type="summary" class="summary {{narrow ? 'band-summary' : ''}}">
+      <list-item type="summary" class="summary {{narrow ? 'band-summary' : ''}}" style="height: {{summaryHeight}}px;">
         <text if="{{recordNotice}}" class="hint {{narrow ? 'band-hint' : ''}}">{{recordNotice}}</text>
-        <text if="{{!recordNotice &amp;&amp; altitude !== '--'}}" class="altitude {{narrow ? 'band-altitude' : ''}}">海拔 {{altitude}} m</text>
-        <text if="{{altitude !== '--' &amp;&amp; recording}}" class="record-state {{recording ? 'good' : ''}} {{narrow ? 'band-record-state' : ''}}">{{recording ? recordInfo : ''}}</text>
-        <text if="{{!recordNotice &amp;&amp; altitude === '--'}}" class="hint {{narrow ? 'band-hint' : ''}}">{{recording ? recordInfo : hint}}</text>
+        <div if="{{!recordNotice}}" class="summary-metric {{narrow ? 'band-summary-metric' : ''}}">
+          <text class="summary-label {{narrow ? 'band-summary-label' : ''}}">海拔 · m</text>
+          <text class="summary-value {{narrow ? 'band-summary-value' : ''}}">{{altitude}}</text>
+        </div>
+        <div if="{{!recordNotice}}" class="summary-metric {{narrow ? 'band-summary-metric' : ''}}">
+          <text class="summary-label {{narrow ? 'band-summary-label' : ''}}">{{recording ? '记录 · ' + recordPoints + ' 点' : 'GPS 更新'}}</text>
+          <text class="summary-value {{recording ? 'good' : ''}} {{narrow ? 'band-summary-value' : ''}}">{{recording ? recordDuration : detailNote}}</text>
+        </div>
       </list-item>
     </list>
     <div class="footer {{narrow ? 'band-footer' : ''}}">
@@ -37,24 +42,25 @@ export default createReadingPage()
 .dashboard { flex: 1; width: 100%; }
 .speed-row { width: 100%; justify-content: center; align-items: center; }
 .speed { width: 100%; height: 82px; font-weight: bold; font-size: 80px; text-align: center; }
-.unit-button { height: 18px; width: 100%; justify-content: center; align-items: center; }
+.unit-button { height: 22px; width: 100%; justify-content: center; align-items: center; }
 .unit { font-size: 12px; color: #a5b7c6; }
-.metrics { width: 100%; height: 34px; align-items: center; justify-content: space-between; }
-.metric { flex: 1; flex-direction: column; align-items: center; }
-.metric-label { font-size: 10px; color: #96aeb8; }
-.metric-value { font-size: 22px; font-weight: bold; color: #edf4fa; text-align: center; }
+.metrics { width: 100%; height: 44px; align-items: center; justify-content: space-between; }
+.metric { flex: 1; height: 100%; flex-direction: column; align-items: center; justify-content: center; }
+.metric-label { width: 100%; height: 16px; text-align: center; font-size: 11px; color: #96aeb8; }
+.metric-value { width: 100%; height: 28px; font-size: 23px; font-weight: bold; color: #edf4fa; text-align: center; }
 .metric-divider { height: 22px; width: 1px; background-color: #263b46; }
-.summary { width: 100%; height: 18px; align-items: center; justify-content: space-between; }
-.altitude { font-size: 11px; color: #b8cbd2; }
-.record-state { font-size: 10px; color: #96aeb8; }
+.summary { width: 100%; height: 32px; align-items: center; justify-content: center; }
+.summary-metric { flex: 1; height: 100%; flex-direction: column; align-items: center; justify-content: center; }
+.summary-label { width: 100%; height: 12px; font-size: 10px; color: #96aeb8; text-align: center; }
+.summary-value { width: 100%; height: 20px; font-size: 16px; color: #b8cbd2; text-align: center; }
+.summary-value.good { color: #7ef7c5; }
 .action { width: 56px; }
 .record-action { width: 64px; }
-.band-unit-button { height: 38px; }
 .band-unit { font-size: 20px; }
-.band-metrics { height: 78px; }
-.band-metric-label { font-size: 16px; }
-.band-metric-value { font-size: 30px; }
-.band-summary { height: 70px; flex-direction: column; justify-content: center; }
-.band-altitude { font-size: 22px; }
-.band-record-state { font-size: 18px; }
+.band-metric-label { height: 22px; font-size: 16px; }
+.band-metric-value { height: 40px; font-size: 30px; }
+.band-summary { flex-direction: column; justify-content: center; }
+.band-summary-metric { flex: 0; width: 100%; height: 56px; }
+.band-summary-label { height: 22px; font-size: 16px; }
+.band-summary-value { height: 34px; font-size: 24px; }
 </style>

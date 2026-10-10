@@ -24,6 +24,7 @@ test('records at most one point per second, includes elevation/UTC and closes va
   assert.match(text, /<ele>-12.50<\/ele>/)
   assert.match(text, /<time>1970-01-01T00:01:41.000Z<\/time>/)
   assert.ok(text.endsWith(GPX_END))
+  assert.doesNotMatch(text, /[\r\n]/)
   assert.equal((text.match(/<ele>/g) || []).length, 1, 'missing altitude is not invented')
   assert.equal((await listTracks(fs.api)).length, 1)
   const summary = await summarizeTrack(fs.api, uri)
@@ -61,8 +62,24 @@ test('recovery truncates a partial point and protects the active recording with 
   assert.equal(fs.data.has(active), true)
   const text = fs.data.get(stale.replace('.part', '.gpx'))
   assert.ok(text.endsWith(GPX_END)); assert.equal((text.match(/<trkpt /g) || []).length, 1)
+  assert.doesNotMatch(text, /[\r\n]/)
 })
 }
+
+test('recovery compacts legacy CRLF files without losing complete points or elevation', async () => {
+  const fs = fakeFiles(); const recorder = createRecorder(fs.api, () => {})
+  await recorder.start(100000)
+  const active = recorder.snapshot().uri
+  const uri = TRACK_DIR + 'track-legacy.part'
+  const points = Array.from({ length: 120 }, (_, i) => trackPoint({ ...fix, altitude: i }, 101000 + i * 1000)).join('')
+  fs.data.set(uri, (fs.data.get(active) + points + '<trkpt lat="3').replace(/></g, '>\r\n<'))
+  assert.deepEqual(await recoverTracks(fs.api, active), { recovered: 1, failed: 0 })
+  const repaired = uri.replace(/\.part$/, '.gpx')
+  assert.doesNotMatch(fs.data.get(repaired), /[\r\n]/)
+  const summary = await summarizeTrack(fs.api, repaired)
+  assert.equal(summary.points, 120); assert.equal(summary.complete, true)
+  assert.equal(summary.elevation, '0 ～ 119 m')
+})
 
 test('inspection spans chunk boundaries and long recordings with bounded reads', async () => {
   const fs = fakeFiles(); const recorder = createRecorder(fs.api, () => {})

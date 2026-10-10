@@ -5,12 +5,12 @@ import { screenLayout } from './layout'
 export function createReadingPage() {
   return {
     private: {
-      pageClass: 'round-page', narrow: false, speed: '--', speedFont: 76, speedHeight: 82, unit: 'km/h',
+      pageClass: 'round-page', narrow: false, speed: '--', speedFont: 76, speedHeight: 54, unitHeight: 22, metricsHeight: 44, summaryHeight: 32, unit: 'km/h',
       altitude: '--', accuracy: '--', average: '--', maximum: '--',
       latitudeNumber: '--', latitudeDirection: '纬度', longitudeNumber: '--', longitudeDirection: '经度',
       statusText: 'GPS 搜星中', statusColor: '#f2bf68', tone: 'warning',
       hint: '请在室外等待 GPS 定位', detailNote: '尚未获取位置',
-      recording: false, saving: false, recordText: '记录', recordInfo: '', recordNotice: ''
+      recording: false, saving: false, recordText: '记录', recordInfo: '', recordNotice: '', recordDuration: '0:00', recordPoints: 0
     },
     onInit() {
       this._destroyed = false
@@ -21,8 +21,14 @@ export function createReadingPage() {
         if (this._destroyed) return
         Object.keys(current).forEach(key => { this[key] = current[key] })
         const width = this.narrow ? 208 : (this.pageClass === 'rect-page' ? 208 : 192)
+        const available = this._screenHeight - (this.narrow ? 72 + 34 + 148 :
+          (this.pageClass === 'rect-page' ? 32 : 40) + 18 + 30)
+        this.unitHeight = this.narrow ? 38 : 22
+        this.metricsHeight = this.narrow ? 78 : (available >= 190 ? 54 : 44)
         this.speedHeight = this.narrow ? 112 : Math.max(50, Math.min(86,
-          this._screenHeight - (this.pageClass === 'rect-page' ? 32 : 40) - 18 - 30 - 70))
+          available - this.unitHeight - this.metricsHeight - 32))
+        this.summaryHeight = Math.max(this.narrow ? 116 : 32,
+          available - this.speedHeight - this.unitHeight - this.metricsHeight)
         this.speedFont = Math.min(this.narrow ? 100 : this.speedHeight - 6,
           Math.floor(width / (Math.max(3, current.speed.length) * 0.65)))
       }

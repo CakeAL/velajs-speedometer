@@ -7,9 +7,9 @@ function ascii(buffer) {
   return text
 }
 
-export const GPX_END = '</trkseg></trk></gpx>\n'
-export const GPX_HEADER = '<?xml version="1.0" encoding="UTF-8"?>\n' +
-  '<gpx version="1.1" creator="Speedometer" xmlns="http://www.topografix.com/GPX/1/1">\n'
+export const GPX_END = '</trkseg></trk></gpx>'
+export const GPX_HEADER = '<?xml version="1.0" encoding="UTF-8"?>' +
+  '<gpx version="1.1" creator="Speedometer" xmlns="http://www.topografix.com/GPX/1/1">'
 
 export function isoTime(now) { return new Date(now).toISOString() }
 
@@ -18,7 +18,7 @@ export function trackPoint(fix, now) {
       typeof fix.longitude !== 'number' || !isFinite(fix.longitude) || Math.abs(fix.longitude) > 180) return null
   const elevation = typeof fix.altitude === 'number' && isFinite(fix.altitude) ? '<ele>' + fix.altitude.toFixed(2) + '</ele>' : ''
   return '<trkpt lat="' + fix.latitude.toFixed(7) + '" lon="' + fix.longitude.toFixed(7) + '">' +
-    elevation + '<time>' + isoTime(now) + '</time></trkpt>\n'
+    elevation + '<time>' + isoTime(now) + '</time></trkpt>'
 }
 
 // Append each second, never keep an entire route in watch RAM. A .part remains
@@ -40,7 +40,7 @@ export function createRecorder(api, onChange) {
         const name = trackName(now)
         const uri = TRACK_DIR + name + '.part'
         await fileCall(api, 'writeText', { uri, text: GPX_HEADER + '<metadata><time>' + isoTime(now) +
-          '</time></metadata><trk><name>' + name + '</name><trkseg>\n' })
+          '</time></metadata><trk><name>' + name + '</name><trkseg>' })
         state = { recording: true, saving: false, points: 0, startedAt: now, uri, message: '等待有效定位' }
         broken = false; busy = false; lastSecond = null; write = Promise.resolve(); emit()
       } catch (error) { state = { ...state, saving: false, message: error.message }; emit(); throw error }
@@ -101,12 +101,12 @@ export async function recoverTracks(api, activeUri) {
         if (!initialized) {
           const headerEnd = text.indexOf('<trkseg>')
           if (text.indexOf('<gpx ') < 0 || headerEnd < 0) throw new Error('文件头不完整')
-          await fileCall(api, 'writeText', { uri: repair, text: text.slice(0, headerEnd + 8) + '\n' })
+          await fileCall(api, 'writeText', { uri: repair, text: text.slice(0, headerEnd + 8).replace(/[\r\n]/g, '') })
           text = text.slice(headerEnd + 8)
           initialized = true
         }
         const end = text.lastIndexOf('</trkpt>')
-        if (end >= 0) await fileCall(api, 'writeText', { uri: repair, text: text.slice(0, end + 8) + '\n', append: true })
+        if (end >= 0) await fileCall(api, 'writeText', { uri: repair, text: text.slice(0, end + 8).replace(/[\r\n]/g, ''), append: true })
         carry = text.slice(end >= 0 ? end + 8 : 0).slice(-512)
         if (bytes.length < 4096) break
       }

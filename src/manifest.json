@@ -26,9 +26,6 @@
       "name": "system.file"
     },
     {
-      "name": "system.storage"
-    },
-    {
       "name": "system.interconnect"
     }
   ],

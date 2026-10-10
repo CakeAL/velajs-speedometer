@@ -2,7 +2,6 @@
 import geolocation from '@system.geolocation'
 import brightness from '@system.brightness'
 import file from '@system.file'
-import storage from '@system.storage'
 import interconnect from '@system.interconnect'
 import { createSession } from './common/session'
 import { createAppClock } from './common/app-clock'
@@ -11,7 +10,7 @@ import { createTrackSync } from './common/track-sync'
 export default {
   onCreate() {
     this.clock = createAppClock()
-    this.session = createSession({ geolocation, brightness, file, storage }, this.clock)
+    this.session = createSession({ geolocation, brightness, file }, this.clock)
     this.trackSync = createTrackSync(interconnect, file, this.session, this.clock)
     this.trackSync.start()
   },

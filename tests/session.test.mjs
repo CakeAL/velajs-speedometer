@@ -5,14 +5,14 @@ const { createSession } = await load('../src/common/session.js')
 const sample = { latitude: 31.23, longitude: 121.47, speed: 10, altitude: 12.6, accuracy: 8 }
 function harness(saved = '') {
   const clock = fakeClock(); const fs = fakeFiles(); const subscriptions = []; const requests = []; const screen = []
-  let unsubscribes = 0; let stored = saved
+  let unsubscribes = 0; let stored = saved; let storageCalls = 0
   const session = createSession({
     file: fs.api,
-    storage: { get(o) { o.success(stored) }, set(o) { stored = o.value; o.success({}) } },
+    storage: { get(o) { storageCalls++; o.success(stored) }, set(o) { storageCalls++; stored = o.value; o.success({}) } },
     brightness: { setKeepScreenOn(o) { screen.push(o.keepScreenOn) } },
     geolocation: { getLocation(o) { requests.push(o) }, subscribe(o) { subscriptions.push(o) }, unsubscribe() { unsubscribes++ } }
   }, clock)
-  return { session, clock, fs, subscriptions, requests, screen, get unsubscribes() { return unsubscribes }, get stored() { return stored } }
+  return { session, clock, fs, subscriptions, requests, screen, get unsubscribes() { return unsubscribes }, get stored() { return stored }, get storageCalls() { return storageCalls } }
 }
 
 test('navigation shares one live GPS stream and stops when the app leaves foreground', async () => {
@@ -40,20 +40,39 @@ test('location errors retry automatically, ignore old callbacks and stop retryin
   assert.equal(h.subscriptions.length, 2); await h.session.dispose()
 })
 
-test('average samples each fresh second including stops, persists and follows the chosen unit', async () => {
-  const h = harness(JSON.stringify({ samples: 2, sum: 40, max: 30 }))
+test('statistics stay in memory, ignore old stored values and sample only fresh GPS seconds including stops', async () => {
+  const legacy = JSON.stringify({ samples: 2, sum: 40, max: 30 })
+  const h = harness(legacy)
   h.session.acquire(() => {}); h.subscriptions[0].callback(sample)
   h.clock.advance(1000)
   h.subscriptions[0].callback({ ...sample, speed: 0 }); h.clock.advance(1000)
-  assert.equal(h.session.snapshot().average, '19.0'); assert.equal(h.session.snapshot().maximum, '36.0')
-  h.session.changeUnit(); assert.equal(h.session.snapshot().average, '5.3'); assert.equal(h.session.snapshot().maximum, '10.0')
+  assert.equal(h.session.snapshot().average, '18.0'); assert.equal(h.session.snapshot().maximum, '36.0')
+  h.session.changeUnit(); assert.equal(h.session.snapshot().average, '5.0'); assert.equal(h.session.snapshot().maximum, '10.0')
   h.clock.advance(10000)
-  const before = JSON.parse(h.stored)
-  assert.equal(before.samples, 7, 'stale GPS seconds must not add synthetic zero samples')
-  await h.session.suspend()
-  const restored = harness(h.stored)
-  assert.equal(restored.session.snapshot().maximum, '36.0')
-  await restored.session.dispose(); await h.session.dispose()
+  assert.equal(h.session.snapshot().average, '2.0', 'stale GPS seconds must not add synthetic zero samples')
+  await h.session.suspend(); await h.session.dispose()
+  assert.equal(h.storageCalls, 0); assert.equal(h.stored, legacy)
+  assert.equal(h.fs.data.size, 0); assert.equal(h.fs.writes.length, 0)
+  const restarted = harness(legacy)
+  assert.equal(restarted.session.snapshot().average, '--'); assert.equal(restarted.session.snapshot().maximum, '--')
+  await restarted.session.dispose(); assert.equal(restarted.storageCalls, 0)
+})
+
+test('reopening without recording resets statistics in either app/page lifecycle order, while navigation preserves them', async () => {
+  for (const appFirst of [true, false]) {
+    const h = harness(); const home = () => {}; const details = () => {}
+    h.session.acquire(home); h.subscriptions[0].callback(sample); h.clock.advance(1000)
+    h.session.release(home); h.session.acquire(details)
+    assert.equal(h.session.snapshot().average, '36.0'); assert.equal(h.session.snapshot().maximum, '36.0')
+    h.session.release(details); h.session.suspend()
+    if (appFirst) { h.session.resume(); h.session.acquire(home) }
+    else { h.session.acquire(home); h.session.resume() }
+    assert.equal(h.session.snapshot().average, '--'); assert.equal(h.session.snapshot().maximum, '--')
+    h.subscriptions.at(-1).callback({ ...sample, speed: 5 }); h.clock.advance(1000)
+    assert.equal(h.session.snapshot().average, '18.0'); assert.equal(h.session.snapshot().maximum, '18.0')
+    await h.session.dispose(); assert.equal(h.storageCalls, 0)
+    assert.equal(h.fs.data.size, 0)
+  }
 })
 
 test('recording survives page hide and app background, then finalizes on destruction', async () => {
@@ -81,7 +100,8 @@ test('recording survives page hide and app background, then finalizes on destruc
   const files = [...h.fs.data].filter(([uri]) => uri.endsWith('.gpx'))
   assert.equal(files.length, 1)
   assert.equal((files[0][1].match(/<trkpt /g) || []).length, 5)
-  assert.ok(files[0][1].endsWith('</trkseg></trk></gpx>\n'))
+  assert.ok(files[0][1].endsWith('</trkseg></trk></gpx>'))
+  assert.doesNotMatch(files[0][1], /[\r\n]/)
   await h.session.dispose()
 })
 
@@ -111,11 +131,14 @@ test('returning from background preserves the recording and stream and starts a 
   const h = harness(); const listener = () => {}
   h.session.acquire(listener); h.subscriptions[0].callback(sample)
   await h.session.toggleRecording(); const uri = h.session.activeUri()
+  h.clock.advance(1000); await settle()
   h.session.release(listener); h.session.suspend()
+  h.subscriptions[0].callback({ ...sample, speed: 20 })
   h.clock.advance(1000); await settle()
   assert.equal(h.session.snapshot().recording, true)
   h.session.resume(); h.session.acquire(listener)
   assert.equal(h.subscriptions.length, 1); assert.equal(h.session.activeUri(), uri)
+  assert.equal(h.session.snapshot().average, '54.0'); assert.equal(h.session.snapshot().maximum, '72.0')
   assert.equal(h.screen.at(-1), true)
   h.clock.advance(10000); assert.equal(h.screen.at(-1), false)
   await h.session.toggleRecording(); assert.equal(h.session.snapshot().recording, false)

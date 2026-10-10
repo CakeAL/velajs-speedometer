@@ -1,6 +1,6 @@
 import { createLocationTracker, locationView, UNITS, SPEED_STALE_AFTER } from './location'
 import { createRecorder } from './recording'
-import { emptyStats, restoreStats, addSpeed, mergeStats, statsView } from './statistics'
+import { emptyStats, addSpeed, statsView } from './statistics'
 
 const STATUS = {
   idle: '等待定位', locating: 'GPS 搜星中', live: 'GPS 已定位', stale: '等待 GPS 更新',
@@ -22,9 +22,6 @@ export function createSession(deps, clock) {
   let releaseTimer = null
   let screenTimer = null
   let lastSecond = null
-  let persistenceBusy = false
-  let persistencePending = false
-  let statsReady = false
   let disposed = false
   let record = { recording: false, saving: false, points: 0, startedAt: null, message: '' }
 
@@ -32,12 +29,14 @@ export function createSession(deps, clock) {
     const now = time.now()
     const readings = locationView(state, unitIndex, now)
     const elapsed = record.startedAt === null ? 0 : Math.floor((now - record.startedAt) / 1000)
+    const duration = Math.floor(elapsed / 60) + ':' + ('0' + elapsed % 60).slice(-2)
     return { ...readings, ...statsView(stats, UNITS[unitIndex].factor),
       statusText: STATUS[state.phase] || STATUS.error,
       statusColor: readings.tone === 'good' ? '#7ef7c5' : '#f2bf68',
       recording: record.recording, saving: record.saving,
       recordText: record.saving ? '保存中' : (record.recording ? '结束' : '记录'),
-      recordInfo: record.recording ? Math.floor(elapsed / 60) + ':' + ('0' + elapsed % 60).slice(-2) + ' · ' + record.points + ' 点' : record.message,
+      recordInfo: record.recording ? duration + ' · ' + record.points + ' 点' : record.message,
+      recordDuration: duration, recordPoints: record.points,
       recordNotice: record.recording ? '' : record.message,
       detailNote: readings.age,
       latitudeNumber: readings.latitudeDetail === '--' ? '--' : readings.latitudeDetail.split('°')[0],
@@ -65,17 +64,14 @@ export function createSession(deps, clock) {
       keepScreenOn(false)
     }, SCREEN_HOLD_MS)
   }
-  function saveStats() {
-    if (!statsReady) return
-    if (persistenceBusy) { persistencePending = true; return }
-    persistenceBusy = true
-    const done = () => {
-      persistenceBusy = false
-      if (persistencePending) { persistencePending = false; saveStats() }
+  function enterForeground() {
+    // A new opening starts fresh; returning to an active recording continues it.
+    // Page navigation never hides the app, so it cannot reset these statistics.
+    if (!foreground && !record.recording && !record.saving) {
+      stats = emptyStats()
+      lastSecond = null
     }
-    try { deps.storage.set({ key: 'speedometer.statistics.v1', value: JSON.stringify(stats), success: done,
-      fail() { record = { ...record, message: '统计保存失败，请检查存储空间' }; emit(); done() } }) }
-    catch (error) { persistenceBusy = false }
+    foreground = true
   }
   const recorder = createRecorder(deps.file, next => {
     record = next; emit()
@@ -108,7 +104,6 @@ export function createSession(deps, clock) {
       lastSecond = second
       if (fresh) stats = addSpeed(stats, state.fix.speed)
       recorder.sample(state.fix, now, fresh)
-      if (second % 5 === 0) saveStats()
     }
     if (state.phase === 'stale' && state.updatedAt !== null && now - state.updatedAt >= 60000) scheduleRetry()
     emit()
@@ -124,15 +119,7 @@ export function createSession(deps, clock) {
     tickTimer = null
     releaseScreen()
     tracker.stop()
-    saveStats()
   }
-  try {
-    deps.storage.get({ key: 'speedometer.statistics.v1', default: '', success(data) {
-      if (statsReady) return
-      try { stats = mergeStats(restoreStats(JSON.parse(data || '{}')), stats) } catch (error) { /* First launch. */ }
-      statsReady = true; emit()
-    }, fail() { statsReady = true } })
-  } catch (error) { statsReady = true }
 
   return {
     snapshot: view,
@@ -140,7 +127,7 @@ export function createSession(deps, clock) {
       if (releaseTimer !== null) time.clearTimeout(releaseTimer)
       releaseTimer = null
       const visibleAgain = !foreground || listeners.length === 0
-      foreground = true
+      enterForeground()
       if (listeners.indexOf(listener) < 0) listeners.push(listener)
       listener(view())
       if (visibleAgain) holdScreenBriefly()
@@ -155,7 +142,7 @@ export function createSession(deps, clock) {
     changeUnit() { unitIndex = (unitIndex + 1) % UNITS.length; emit() },
     async toggleRecording() {
       if (record.saving) return
-      if (record.recording) { const uri = await recorder.finish(); saveStats(); return uri }
+      if (record.recording) return recorder.finish()
       await recorder.start(time.now()); start()
     },
     activeUri() {
@@ -165,7 +152,7 @@ export function createSession(deps, clock) {
     resume() {
       if (disposed) return
       const visibleAgain = !foreground
-      foreground = true
+      enterForeground()
       if (listeners.length > 0) {
         if (visibleAgain) holdScreenBriefly()
         start(); emit()
@@ -177,7 +164,6 @@ export function createSession(deps, clock) {
       // An active geolocation subscription declared as a background feature
       // keeps the app alive. Keep sampling and writing while recording/saving.
       if (!wanted()) stop()
-      else saveStats()
     },
     async dispose() {
       disposed = true

@@ -62,8 +62,8 @@ test('reading pages navigate independently, keep their shared session and fit a 
   const page = createReadingPage()
   const vm = { ...page, ...page.private, $app: { $def: { session } } }
   vm.onInit(); vm.onShow()
-  assert.equal(vm.speed, '36'); assert.equal(vm.speedFont, 76)
-  assert.equal(vm.speedHeight + 70, 152, 'home content fits normalized circle height')
+  assert.equal(vm.speed, '36'); assert.ok(vm.speedFont > 0 && vm.speedFont < vm.speedHeight)
+  assert.equal(vm.speedHeight + vm.unitHeight + vm.metricsHeight + vm.summaryHeight, 152, 'home content fits normalized circle height')
   vm.openPosition(); vm.openTracks(); vm.back()
   assert.deepEqual(routes, ['/pages/position', '/pages/tracks', 'back'])
   await vm.toggleRecording(); assert.equal(vm.recordText, '结束')
