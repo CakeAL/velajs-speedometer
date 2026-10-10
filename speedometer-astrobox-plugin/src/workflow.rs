@@ -15,6 +15,7 @@ pub enum Goal {
     All,
     Download(Track),
     Delete(Track),
+    DeleteAll,
 }
 #[derive(Clone, Debug)]
 pub struct Call {
@@ -29,6 +30,7 @@ impl Call {
 pub enum Action {
     Request(Call),
     Export(Track),
+    ConfirmDelete(usize),
     Done,
 }
 pub struct Transition {
@@ -64,6 +66,7 @@ enum Step {
     List,
     Read,
     Delete,
+    ConfirmDelete,
     Finished,
 }
 pub struct Workflow {
@@ -152,6 +155,38 @@ impl Workflow {
             cache_changed: true,
         }
     }
+    fn next_delete(&mut self) -> Transition {
+        if let Some(track) = self.queue.get(self.index) {
+            self.step = Step::Delete;
+            Transition::request(
+                Call::new("delete", json!({"name":track.name,"etag":track.etag})),
+                format!("正在删除手表轨迹 {}/{}…", self.index + 1, self.queue.len()),
+            )
+        } else {
+            self.step = Step::Finished;
+            Transition::done(format!(
+                "已删除手表上的 {} 条轨迹，本地副本保留",
+                self.index
+            ))
+        }
+    }
+    pub fn confirm_deletion(&mut self) -> Result<Transition, String> {
+        if self.step != Step::ConfirmDelete {
+            return Err("删除确认状态无效".into());
+        }
+        Ok(self.next_delete())
+    }
+    pub fn failure_message(&self, error: String) -> String {
+        if matches!(self.goal, Goal::DeleteAll) && !self.queue.is_empty() {
+            format!(
+                "已确认删除 {}/{} 条手表轨迹；{error}。请同步列表确认剩余文件",
+                self.index,
+                self.queue.len()
+            )
+        } else {
+            error
+        }
+    }
     pub fn accept(&mut self, result: Value) -> Result<Transition, String> {
         match self.step {
             Step::Hello => {
@@ -167,7 +202,7 @@ impl Workflow {
                     return Err("手表端 GPX 协议不兼容，请更新速度计应用".into());
                 }
                 match self.goal.clone() {
-                    Goal::Sync | Goal::All => {
+                    Goal::Sync | Goal::All | Goal::DeleteAll => {
                         self.step = Step::List;
                         Ok(self.list_call())
                     }
@@ -176,11 +211,8 @@ impl Workflow {
                         self.next_download()
                     }
                     Goal::Delete(t) => {
-                        self.step = Step::Delete;
-                        Ok(Transition::request(
-                            Call::new("delete", json!({"name":t.name,"etag":t.etag})),
-                            "正在删除手表文件…",
-                        ))
+                        self.queue = vec![t];
+                        Ok(self.next_delete())
                     }
                 }
             }
@@ -198,6 +230,16 @@ impl Workflow {
                 let mut next = if matches!(self.goal, Goal::All) {
                     self.queue = self.files.clone();
                     self.next_download()?
+                } else if matches!(self.goal, Goal::DeleteAll) && !self.files.is_empty() {
+                    self.queue = self.files.clone();
+                    self.step = Step::ConfirmDelete;
+                    Transition {
+                        action: Action::ConfirmDelete(self.queue.len()),
+                        status: "列表已读取，等待确认删除…".into(),
+                        files: None,
+                        progress: None,
+                        cache_changed: false,
+                    }
                 } else {
                     self.step = Step::Finished;
                     Transition::done(format!(
@@ -240,15 +282,14 @@ impl Workflow {
                 Ok(next)
             }
             Step::Delete => {
-                let Goal::Delete(track) = &self.goal else {
-                    return Err("删除状态无效".into());
-                };
+                let track = self.queue.get(self.index).ok_or("删除状态无效")?;
                 if result["name"].as_str() != Some(&track.name) || !result["deleted"].is_boolean() {
                     return Err("删除回复格式错误，请刷新列表确认文件是否仍存在".into());
                 }
-                self.step = Step::Finished;
-                Ok(Transition::done("手表文件已删除，本地副本保留"))
+                self.index += 1;
+                Ok(self.next_delete())
             }
+            Step::ConfirmDelete => Err("请先确认删除".into()),
             Step::Finished => Err("该操作已经结束".into()),
         }
     }
@@ -383,5 +424,81 @@ mod tests {
                 .len(),
             1
         );
+    }
+    #[test]
+    fn delete_all_lists_every_page_then_waits_for_confirmation_and_deletes_snapshot() {
+        let f = fixture();
+        let temp = Temp::new();
+        let original: Track =
+            serde_json::from_value(f["list"]["result"]["files"][0].clone()).unwrap();
+        let tracks: Vec<_> = (0..5)
+            .map(|i| {
+                let mut t = original.clone();
+                t.name = format!("track-{i}.gpx");
+                t
+            })
+            .collect();
+        let (mut w, _) = Workflow::new(&temp.0, "watch", Goal::DeleteAll).unwrap();
+        assert_eq!(op(&w.accept(f["hello"]["result"].clone()).unwrap()), "list");
+        let t = w
+            .accept(json!({"files":&tracks[..4],"nextOffset":4,"total":5}))
+            .unwrap();
+        let Action::Request(call) = t.action else {
+            panic!("expected another page")
+        };
+        assert_eq!(call.op, "list");
+        assert_eq!(call.fields["offset"], 4);
+        let t = w
+            .accept(json!({"files":&tracks[4..],"nextOffset":null,"total":5}))
+            .unwrap();
+        assert!(matches!(t.action, Action::ConfirmDelete(5)));
+        assert_eq!(t.files.unwrap(), tracks);
+        assert!(w.accept(json!({})).is_err());
+        let mut t = w.confirm_deletion().unwrap();
+        assert!(w.confirm_deletion().is_err());
+        for track in tracks {
+            let Action::Request(call) = t.action else {
+                panic!("expected deletion")
+            };
+            assert_eq!(call.op, "delete");
+            assert_eq!(call.fields["name"], track.name);
+            assert_eq!(call.fields["etag"], track.etag);
+            if w.index == 1 {
+                assert!(w.failure_message("连接中断".into()).contains("1/5"));
+            }
+            // Replayed deletion after a lost reply reports false and is still success.
+            t = w
+                .accept(json!({"name":track.name,"deleted":false}))
+                .unwrap();
+        }
+        assert!(matches!(t.action, Action::Done));
+        assert!(t.status.contains("5 条"));
+    }
+    #[test]
+    fn delete_all_empty_list_needs_no_confirmation_and_wrong_reply_does_not_advance() {
+        let f = fixture();
+        let temp = Temp::new();
+        let (mut w, _) = Workflow::new(&temp.0, "watch", Goal::DeleteAll).unwrap();
+        w.accept(f["hello"]["result"].clone()).unwrap();
+        assert!(matches!(
+            w.accept(json!({"files":[],"nextOffset":null,"total":0}))
+                .unwrap()
+                .action,
+            Action::Done
+        ));
+        let t: Track = serde_json::from_value(f["list"]["result"]["files"][0].clone()).unwrap();
+        let (mut w, _) = Workflow::new(&temp.0, "watch", Goal::Delete(t.clone())).unwrap();
+        w.accept(f["hello"]["result"].clone()).unwrap();
+        assert!(
+            w.accept(json!({"name":"track-wrong.gpx","deleted":true}))
+                .is_err()
+        );
+        assert_eq!(w.index, 0);
+        assert!(matches!(
+            w.accept(json!({"name":t.name,"deleted":true}))
+                .unwrap()
+                .action,
+            Action::Done
+        ));
     }
 }

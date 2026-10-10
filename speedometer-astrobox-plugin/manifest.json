@@ -1,8 +1,8 @@
 {
   "name": "Speedometer GPX",
   "icon": "icon.png",
-  "version": "0.1.0",
-  "description": "同步速度计手表应用的 GPX 轨迹，支持断点下载、导出和删除。",
+  "version": "1.0.0",
+  "description": "同步手表 GPX 轨迹，支持断点下载、批量 ZIP 导出，以及手表和本地轨迹的单条或全部删除。",
   "author": "cakeal",
   "website": "https://abox.run/docs/plugin-development/v4/whats-new",
   "entry": "speedometer_astrobox_plugin.wasm",

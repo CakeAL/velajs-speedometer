@@ -1,3 +1,4 @@
+mod archive;
 mod cache;
 mod protocol;
 mod workflow;

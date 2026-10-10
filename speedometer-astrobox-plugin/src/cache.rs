@@ -1,6 +1,7 @@
 use crate::protocol::{Track, valid_name};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeSet,
     fs::{self, File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
@@ -51,6 +52,36 @@ impl Cache {
         file.write_all(&json).map_err(io_error)?;
         file.sync_all().map_err(io_error)?;
         fs::rename(temp, self.path(&entry.track.name, ".json")?).map_err(io_error)
+    }
+    // Include interrupted downloads and orphaned files, not just readable checkpoints.
+    pub fn names(&self) -> Result<Vec<String>, String> {
+        let mut names = BTreeSet::new();
+        for item in fs::read_dir(&self.dir).map_err(io_error)? {
+            let item = item.map_err(io_error)?;
+            if !item.file_type().map_err(io_error)?.is_file() {
+                continue;
+            }
+            let name = item.file_name().to_string_lossy().into_owned();
+            let base = [".json.tmp", ".json", ".part"]
+                .into_iter()
+                .find_map(|suffix| name.strip_suffix(suffix))
+                .unwrap_or(&name);
+            if valid_name(base) {
+                names.insert(base.to_owned());
+            }
+        }
+        Ok(names.into_iter().collect())
+    }
+    pub fn remove(&self, name: &str) -> Result<(), String> {
+        // Remove data before checkpoints so a failed deletion still has its metadata.
+        for suffix in ["", ".part", ".json.tmp", ".json"] {
+            match fs::remove_file(self.path(name, suffix)?) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(io_error(e)),
+            }
+        }
+        Ok(())
     }
     pub fn entries(&self) -> Result<Vec<Entry>, String> {
         let mut entries = vec![];
@@ -294,5 +325,39 @@ mod tests {
         t.name = "track-../escape.gpx".into();
         assert!(temp.cache("watch").begin(&t).is_err());
         assert!(temp.cache("other").entries().unwrap().is_empty());
+    }
+    #[test]
+    fn deletion_removes_completed_partial_and_orphan_files_for_only_one_device() {
+        let temp = Temp::new();
+        let complete = track(4);
+        for addr in ["watch", "other"] {
+            let mut d = temp.cache(addr).begin(&complete).unwrap();
+            d.append(b"test").unwrap();
+            d.finish().unwrap();
+        }
+        let mut partial = track(9);
+        partial.name = "track-partial.gpx".into();
+        let mut d = temp.cache("watch").begin(&partial).unwrap();
+        d.append(b"1234").unwrap();
+        drop(d);
+        let cache = temp.cache("watch");
+        fs::write(
+            cache.path("track-orphan.gpx", ".json.tmp").unwrap(),
+            b"broken",
+        )
+        .unwrap();
+        fs::write(cache.dir.join("keep.txt"), b"keep").unwrap();
+        assert_eq!(cache.names().unwrap().len(), 3);
+        cache.remove(&complete.name).unwrap();
+        cache.remove(&complete.name).unwrap(); // Missing files are already deleted.
+        assert_eq!(cache.entries().unwrap().len(), 1);
+        assert!(temp.cache("other").open_complete(&complete).is_ok());
+        for name in cache.names().unwrap() {
+            cache.remove(&name).unwrap();
+        }
+        assert!(cache.names().unwrap().is_empty());
+        assert!(cache.entries().unwrap().is_empty());
+        assert!(cache.dir.join("keep.txt").exists());
+        assert!(cache.remove("track-../other.gpx").is_err());
     }
 }

@@ -10,6 +10,7 @@ use astrobox_ng_wit::{
 use serde_json::Value;
 use std::{
     collections::HashSet,
+    fs::File,
     io::Read,
     path::Path,
     sync::{Mutex, MutexGuard, OnceLock},
@@ -97,16 +98,20 @@ fn refresh_cache() {
     }
 }
 fn finish(generation: u64, message: impl Into<String>, error: bool) {
+    let mut message = message.into();
     let pending = {
         let mut s = state();
         if s.generation != generation {
             return;
         }
+        if error && let Some(w) = &s.workflow {
+            message = w.failure_message(message);
+        }
         s.workflow.take();
         s.busy = false;
         s.cancelled = false;
         s.progress = None;
-        s.status = message.into();
+        s.status = message;
         s.error = error;
         s.pending.take()
     };
@@ -267,43 +272,67 @@ async fn send_call(addr: &str, call: Call, mut attempt: u8, generation: u64) {
         }
     }
 }
-async fn drive(workflow: Workflow, next: Transition, generation: u64) {
-    if !active(generation) {
-        return;
-    }
-    let addr = workflow.addr.clone();
-    {
-        let mut s = state();
-        if let Some(files) = next.files {
-            s.tracks = files;
+async fn drive(mut workflow: Workflow, mut next: Transition, generation: u64) {
+    loop {
+        if !active(generation) {
+            return;
         }
-        s.status = next.status;
-        s.error = false;
-        s.progress = next.progress;
-    }
-    if next.cache_changed {
-        refresh_cache();
-    }
-    redraw();
-    match next.action {
-        Action::Request(call) => {
-            state().workflow = Some(workflow);
-            send_call(&addr, call, 0, generation).await;
+        let addr = workflow.addr.clone();
+        {
+            let mut s = state();
+            if let Some(files) = next.files {
+                s.tracks = files;
+            }
+            s.status = next.status;
+            s.error = false;
+            s.progress = next.progress;
         }
-        Action::Export(track) => {
-            // This step awaits only host-owned file-dialog operations.
-            let result = export(&addr, &track, generation).await;
-            if let Err(error) = result {
-                finish(generation, error, true);
-            } else {
+        if next.cache_changed {
+            refresh_cache();
+        }
+        redraw();
+        match next.action {
+            Action::Request(call) => {
+                state().workflow = Some(workflow);
+                send_call(&addr, call, 0, generation).await;
+            }
+            Action::Export(track) => {
+                // This step awaits only host-owned file-dialog operations.
+                let result = export(&addr, &track, generation).await;
+                if let Err(error) = result {
+                    finish(generation, error, true);
+                } else {
+                    let message = state().status.clone();
+                    finish(generation, message, false);
+                }
+            }
+            Action::Done => {
                 let message = state().status.clone();
                 finish(generation, message, false);
             }
+            Action::ConfirmDelete(count) => {
+                let confirmed = confirm(
+                "删除手表全部轨迹？",
+                format!("将删除刚刚读取的 {count} 条已完成轨迹。正在记录的轨迹不受影响，已下载的本地副本会保留。"),
+                "删除全部手表轨迹",
+            ).await;
+                if !active(generation) {
+                    return;
+                }
+                if !confirmed {
+                    finish(generation, "已取消删除", false);
+                    return;
+                }
+                match workflow.confirm_deletion() {
+                    Ok(transition) => {
+                        next = transition;
+                        continue;
+                    }
+                    Err(error) => finish(generation, error, true),
+                }
+            }
         }
-        Action::Done => {
-            let message = state().status.clone();
-            finish(generation, message, false);
-        }
+        return;
     }
 }
 fn timer_matches(payload: &str, p: &Pending) -> bool {
@@ -355,6 +384,9 @@ pub async fn receive(kind: EventType, payload: &str) {
             let result = match reply.result() {
                 Ok(result) => result,
                 Err(error) => {
+                    let error = workflow
+                        .as_ref()
+                        .map_or_else(|| error.clone(), |w| w.failure_message(error.clone()));
                     finish(p.generation, error, true);
                     return;
                 }
@@ -372,7 +404,7 @@ pub async fn receive(kind: EventType, payload: &str) {
                     }
                     drive(w, next, p.generation).await;
                 }
-                Err(error) => finish(p.generation, error, true),
+                Err(error) => finish(p.generation, w.failure_message(error), true),
             }
         }
         EventType::Timer => {
@@ -434,13 +466,16 @@ pub async fn receive(kind: EventType, payload: &str) {
 }
 async fn export(addr: &str, track: &Track, generation: u64) -> Result<(), String> {
     let mut file = cache(addr)?.open_complete(track)?;
+    save(&mut file, &track.name, "gpx", generation).await
+}
+async fn save(file: &mut File, name: &str, extension: &str, generation: u64) -> Result<(), String> {
     check_active(generation)?;
-    set_status("选择 GPX 的保存位置…", false);
+    set_status(format!("选择 {name} 的保存位置…"), false);
     let session = dialog::save_file_start(dialog::FilterConfig {
         multiple: false,
-        extensions: vec!["gpx".into()],
+        extensions: vec![extension.into()],
         default_directory: String::new(),
-        default_file_name: track.name.clone(),
+        default_file_name: name.into(),
     })
     .await
     .map_err(|e| format!("未保存文件：{e}"))?;
@@ -450,7 +485,7 @@ async fn export(addr: &str, track: &Track, generation: u64) -> Result<(), String
             check_active(generation)?;
             let n = file
                 .read(&mut buffer)
-                .map_err(|e| format!("读取本地轨迹失败：{e}"))?;
+                .map_err(|e| format!("读取本地文件失败：{e}"))?;
             if n == 0 {
                 break;
             }
@@ -474,16 +509,47 @@ async fn export(addr: &str, track: &Track, generation: u64) -> Result<(), String
     }
     Ok(())
 }
+async fn export_all(addr: &str, entries: &[Entry], generation: u64) -> Result<(), String> {
+    let entries: Vec<_> = entries.iter().filter(|e| e.complete).cloned().collect();
+    check_active(generation)?;
+    set_status(format!("正在打包 {} 条本地轨迹…", entries.len()), false);
+    let path = Path::new(CACHE_ROOT).join(format!("export-{generation}.zip.tmp"));
+    let mut archive =
+        crate::archive::prepare(&cache(addr)?, &entries, &path, || check_active(generation))?;
+    let time = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let name = format!("Speedometer-GPX-{time}.zip");
+    save(&mut archive.file, &name, "zip", generation).await?;
+    check_active(generation)?;
+    set_status(
+        format!(
+            "已导出 {} 条轨迹到 ZIP，可在手机解压到目标文件夹",
+            entries.len()
+        ),
+        false,
+    );
+    Ok(())
+}
 async fn confirm_delete(track: &Track) -> bool {
+    confirm(
+        "删除手表上的轨迹？",
+        format!(
+            "{}\n{}\n手表上的文件将被删除，已下载的本地副本会保留。",
+            track.display_time, track.name
+        ),
+        "删除手表文件",
+    )
+    .await
+}
+async fn confirm(title: &str, content: String, label: &str) -> bool {
     dialog::show_dialog(
         dialog::DialogType::Alert,
         dialog::DialogStyle::Website,
         dialog::DialogInfo {
-            title: "删除手表上的轨迹？".into(),
-            content: format!(
-                "{}\n{}\n手表上的文件将被删除，已下载的本地副本会保留。",
-                track.display_time, track.name
-            ),
+            title: title.into(),
+            content,
             buttons: vec![
                 dialog::DialogButton {
                     id: "cancel".into(),
@@ -493,7 +559,7 @@ async fn confirm_delete(track: &Track) -> bool {
                 dialog::DialogButton {
                     id: "delete".into(),
                     primary: true,
-                    content: "删除手表文件".into(),
+                    content: label.into(),
                 },
             ],
         },
@@ -518,7 +584,11 @@ pub async fn action(id: &str, event: ui::Event, _payload: &str) {
         if let Some(id) = pending.and_then(|p| p.timer_id) {
             timer::clear_timer(id);
         }
-        finish(generation, "已取消，已接收的数据保留，可继续下载", false);
+        finish(
+            generation,
+            "已取消后续操作；已完成的下载、导出或删除保留",
+            false,
+        );
         return;
     }
     let (addr, remote, cached, generation) = {
@@ -563,6 +633,41 @@ pub async fn action(id: &str, event: ui::Event, _payload: &str) {
         if addr.is_empty() {
             return Err("请先在 AstroBox 连接一台手表，然后刷新设备列表".into());
         }
+        if id == "export-all" {
+            export_all(&addr, &cached, generation).await?;
+            let message = state().status.clone();
+            finish(generation, message, false);
+            return Ok(());
+        }
+        if id == "local-delete-all" || id.starts_with("local-delete:") {
+            let local = cache(&addr)?;
+            let names = if id == "local-delete-all" {
+                local.names()?
+            } else {
+                let index = id.strip_prefix("local-delete:").ok_or("未知操作")?.parse::<usize>().map_err(|_| "轨迹编号无效")?;
+                vec![cached.get(index).ok_or("本地列表已变化，请重新选择")?.track.name.clone()]
+            };
+            if names.is_empty() {
+                finish(generation, "暂无本地轨迹", false);
+                return Ok(());
+            }
+            let content = if id == "local-delete-all" {
+                format!("将删除当前设备的 {} 条本地轨迹，包括未完成的下载。手表原文件和已导出到手机的文件会保留。", names.len())
+            } else {
+                format!("{}\n本地副本及下载进度将被删除。手表原文件和已导出的文件会保留。", names[0])
+            };
+            if !confirm("删除本地轨迹？", content, "删除本地轨迹").await {
+                finish(generation, "已取消删除", false);
+                return Ok(());
+            }
+            check_active(generation)?;
+            for (i, name) in names.iter().enumerate() {
+                check_active(generation)?;
+                local.remove(name).map_err(|e| format!("已删除 {i}/{} 条本地轨迹；{e}", names.len()))?;
+            }
+            finish(generation, format!("已删除 {} 条本地轨迹", names.len()), false);
+            return Ok(());
+        }
         if let Some(index) = id
             .strip_prefix("export:")
             .and_then(|s| s.parse::<usize>().ok())
@@ -576,6 +681,7 @@ pub async fn action(id: &str, event: ui::Event, _payload: &str) {
         let goal = match id {
             "sync" => Goal::Sync,
             "all" => Goal::All,
+            "delete-all" => Goal::DeleteAll,
             _ => {
                 let (operation, index) = id.split_once(':').ok_or("未知操作")?;
                 let index: usize = index.parse().map_err(|_| "轨迹编号无效")?;

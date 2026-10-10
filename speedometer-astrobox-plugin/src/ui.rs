@@ -87,6 +87,11 @@ pub fn build(s: &State) -> Element {
             "下载全部轨迹",
             "all",
             s.busy || s.selected.is_empty(),
+        ))
+        .child(button(
+            "删除手表全部轨迹",
+            "delete-all",
+            s.busy || s.selected.is_empty(),
         ));
     if s.busy {
         actions = actions.child(button("取消操作", "cancel", s.cancelled));
@@ -167,33 +172,64 @@ pub fn build(s: &State) -> Element {
         .child(Element::new(T::Separator, None))
         .child(text(
             &format!(
-                "本地轨迹 · {}",
+                "本地轨迹 · {}（已完成 {}）",
+                s.cached.len(),
                 s.cached.iter().filter(|e| e.complete).count()
             ),
             21,
         ))
         .child(
             text(
-                "已下载的副本可以离线导出。删除手表文件后，本地副本仍会保留。",
+                "本地轨迹可以离线管理；全部导出为 ZIP 后，可在手机解压到目标文件夹。",
                 13,
             )
             .text_color(muted),
+        )
+        .child(
+            Element::new(T::Grid, None)
+                .grid_template_columns(if s.narrow { "1fr" } else { "1fr 1fr" })
+                .gap(10)
+                .child(button(
+                    "全部导出为 ZIP",
+                    "export-all",
+                    s.busy || !s.cached.iter().any(|e| e.complete),
+                ))
+                .child(button(
+                    "删除全部本地轨迹",
+                    "local-delete-all",
+                    s.busy || s.selected.is_empty(),
+                )),
         );
     let mut local = Element::new(T::Grid, None)
         .grid_template_columns(if s.narrow { "1fr" } else { "1fr 1fr" })
         .gap(14)
         .width_full();
-    for (index, entry) in s.cached.iter().enumerate().filter(|(_, e)| e.complete) {
+    for (index, entry) in s.cached.iter().enumerate() {
         local = local.child(
-            track_card(&entry.track, "本地副本", card, muted).child(button(
+            track_card(
+                &entry.track,
+                if entry.complete {
+                    "本地副本"
+                } else {
+                    "下载未完成"
+                },
+                card,
+                muted,
+            )
+            .child(button(
                 "导出 GPX",
                 &format!("export:{index}"),
+                s.busy || !entry.complete,
+            ))
+            .child(button(
+                "删除本地轨迹",
+                &format!("local-delete:{index}"),
                 s.busy,
             )),
         );
     }
-    if !s.cached.iter().any(|e| e.complete) {
-        local = local.child(text("暂无已下载轨迹", 14).text_color(muted));
+    if s.cached.is_empty() {
+        local = local.child(text("暂无本地轨迹", 14).text_color(muted));
     }
     root.child(local)
 }
