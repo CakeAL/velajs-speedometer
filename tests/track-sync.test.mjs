@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { load, fakeFiles, fakeClock, settle } from './helpers.mjs'
 const { createTrackProtocol, PROTOCOL, VERSION, CHUNK_BYTES } = await load('../src/common/track-protocol.js')
 const { createTrackSync } = await load('../src/common/track-sync.js')
-const { base64, crc32, toBytes } = await load('../src/common/transfer-bytes.js')
+const { base64, crc32, toBytes } = await load('../src/common/bytes.js')
 const { TRACK_DIR } = await load('../src/common/files.js')
 
 const request = (op, fields = {}) => ({ protocol: PROTOCOL, version: VERSION, id: 'test-1', op, ...fields })

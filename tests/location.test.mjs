@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
 const load = async path => import('data:text/javascript;base64,' + Buffer.from(await readFile(new URL(path, import.meta.url))).toString('base64'))
-const { normalizeSpeed, normalizeLocation, coordinate, locationView, createLocationTracker, SPEED_STALE_AFTER, STALE_AFTER } = await load('../src/common/location.js')
-const { screenLayout } = await load('../src/common/layout.js')
+const { normalizeSpeed, normalizeLocation, locationView, createLocationTracker, SPEED_STALE_AFTER, STALE_AFTER } = await load('../src/common/location.js')
+const { screenLayout, dashboardLayout } = await load('../src/common/layout.js')
 const sample = { latitude: 31.230416, longitude: 121.473701, speed: 10, altitude: 12.6, accuracy: 8 }
 
 function harness() {
@@ -14,9 +14,10 @@ function harness() {
   const requests = []
   const subscriptions = []
   const changes = []
+  const calls = []
   const api = {
-    getLocation(options) { requests.push(options) },
-    subscribe(options) { subscriptions.push(options) },
+    getLocation(options) { calls.push('snapshot'); requests.push(options) },
+    subscribe(options) { calls.push('subscribe'); subscriptions.push(options) },
     unsubscribe() { unsubscribes += 1 }
   }
   const clock = {
@@ -26,7 +27,7 @@ function harness() {
   }
   const tracker = createLocationTracker(api, state => changes.push(state), clock)
   return {
-    api, tracker, requests, subscriptions,
+    api, tracker, requests, subscriptions, calls,
     advance(ms) { now += ms; if (interval) interval() },
     view(unit = 0) { return locationView(changes.at(-1), unit, now) },
     get state() { return changes.at(-1) },
@@ -51,8 +52,10 @@ test('valid speed is displayed without any coordinate or altitude fields', () =>
   const fix = normalizeLocation({ speed: '10' })
   const view = locationView({ phase: 'live', fix, updatedAt: 0 }, 0, 0)
   assert.equal(view.speed, '36')
-  assert.equal(view.latitude, '--')
-  assert.equal(view.longitude, '--')
+  assert.equal(view.latitudeNumber, '--')
+  assert.equal(view.longitudeNumber, '--')
+  assert.equal(view.latitudeDirection, '纬度')
+  assert.equal(view.longitudeDirection, '经度')
   assert.equal(view.altitude, '--')
 })
 
@@ -71,7 +74,7 @@ test('missing speed and altitude remain unavailable', () => {
   const view = locationView({ phase: 'live', fix, updatedAt: 10 }, 0, 10)
   assert.equal(view.speed, '--')
   assert.equal(view.altitude, '--')
-  assert.equal(view.latitude, '31.23042° N')
+  assert.equal(view.latitudeNumber, '31.230416')
 })
 
 test('zero coordinates and below-sea-level altitude are valid', () => {
@@ -79,7 +82,9 @@ test('zero coordinates and below-sea-level altitude are valid', () => {
   const view = locationView({ phase: 'live', fix, updatedAt: 0 }, 0, 0)
   assert.equal(view.speed, '0')
   assert.equal(view.altitude, '-10')
-  assert.equal(view.latitude, '0.00000° N')
+  assert.equal(view.latitudeNumber, '0.000000')
+  assert.equal(view.latitudeDirection, '北纬 N')
+  assert.equal(view.longitudeDirection, '东经 E')
 })
 
 test('formats units and hemispheres without mutating the speed sample', () => {
@@ -88,8 +93,11 @@ test('formats units and hemispheres without mutating the speed sample', () => {
   assert.equal(locationView(state, 1, 0).speed, '10.0')
   assert.equal(locationView(state, 2, 0).speed, '22')
   assert.equal(locationView(state, 0, 0).speed, '36')
-  assert.equal(coordinate(-121.473701, false, 6), '121.473701° W')
-  assert.equal(coordinate(-31.230416, true, 5), '31.23042° S')
+  const southern = locationView({ ...state, fix: normalizeLocation({ ...sample, latitude: -31.230416, longitude: -121.473701 }) }, 0, 0)
+  assert.equal(southern.latitudeNumber, '31.230416')
+  assert.equal(southern.latitudeDirection, '南纬 S')
+  assert.equal(southern.longitudeNumber, '121.473701')
+  assert.equal(southern.longitudeDirection, '西经 W')
 })
 
 test('prefers horizontal accuracy and warns about poor precision', () => {
@@ -105,16 +113,16 @@ test('after five seconds speed resets to zero and is labelled as stale', () => {
   const view = locationView(state, 0, SPEED_STALE_AFTER)
   assert.equal(view.speed, '0')
   assert.equal(view.tone, 'warning')
-  assert.equal(view.hint, '5 秒未更新，速度已归零')
-  assert.equal(view.latitude, '31.23042° N')
-  assert.equal(locationView(state, 0, STALE_AFTER).latitude, '--')
+  assert.equal(view.detailNote, '5 秒前更新')
+  assert.equal(view.latitudeNumber, '31.230416')
+  assert.equal(locationView(state, 0, STALE_AFTER).latitudeNumber, '--')
 })
 
 test('paused and failed states hide old measurements', () => {
   for (const phase of ['paused', 'error', 'denied', 'unsupported']) {
     const view = locationView({ phase, fix: normalizeLocation(sample), updatedAt: 0 }, 0, 1)
     assert.equal(view.speed, '--')
-    assert.equal(view.latitude, '--')
+    assert.equal(view.latitudeNumber, '--')
     assert.equal(view.altitude, '--')
   }
 })
@@ -126,6 +134,7 @@ test('starts the reference initial request and subscription immediately, once', 
   assert.equal(h.requests.length, 1)
   assert.equal(h.requests[0].timeout, 60000)
   assert.equal(h.subscriptions.length, 1)
+  assert.deepEqual(h.calls, ['subscribe', 'snapshot'])
   h.subscriptions[0].callback({ speed: '10' })
   assert.equal(h.state.phase, 'live')
   assert.equal(h.view().speed, '36')
@@ -179,8 +188,27 @@ test('initial snapshot timeout does not stop continuous listening', () => {
   h.requests[0].fail('timeout', 204)
   assert.equal(h.state.phase, 'timeout')
   assert.equal(h.unsubscribes, 0)
+  assert.equal(h.tracker.isListening(), true)
   h.subscriptions[0].callback(sample)
   assert.equal(h.view().speed, '36')
+})
+
+test('an unavailable single snapshot does not mark a valid continuous GPS subscription unsupported', () => {
+  const h = harness()
+  h.api.getLocation = undefined
+  h.tracker.start()
+  assert.equal(h.state.phase, 'locating'); assert.equal(h.tracker.isListening(), true)
+  h.subscriptions[0].callback(sample)
+  assert.equal(h.view().speed, '36')
+  h.tracker.stop(); assert.equal(h.tracker.isListening(), false)
+})
+
+test('a synchronous subscription failure cannot be hidden by starting a single snapshot afterwards', () => {
+  const h = harness()
+  h.api.subscribe = options => options.fail('unsupported', 203)
+  h.tracker.start()
+  assert.equal(h.state.phase, 'unsupported'); assert.equal(h.tracker.isListening(), false)
+  assert.equal(h.requests.length, 0); assert.equal(h.running, false)
 })
 
 test('stale timeout keeps the subscription and never starts repeated snapshots', () => {
@@ -236,4 +264,23 @@ test('layouts follow screen shape and aspect ratio instead of a model list', () 
   assert.equal(screenLayout({ screenWidth: 336, screenHeight: 480, screenShape: 'rect' }).pageClass, 'rect-page')
   assert.equal(screenLayout({ screenWidth: 212, screenHeight: 520, screenShape: 'pill-shaped' }).narrow, true)
   assert.equal(screenLayout(null).pageClass, 'round-page')
+})
+
+test('dashboard fits watch screens and keeps narrow scrolling rows and long speeds readable', () => {
+  for (const info of [
+    { screenWidth: 466, screenHeight: 466, screenShape: 'circle' },
+    { screenWidth: 432, screenHeight: 514, screenShape: 'rect' },
+    { screenWidth: 212, screenHeight: 520, screenShape: 'pill-shaped' }
+  ]) {
+    const layout = screenLayout(info)
+    const rows = dashboardLayout(layout, '1234.5')
+    const occupied = rows.speedHeight + rows.unitHeight + rows.metricsHeight + rows.summaryHeight
+    const reserved = layout.narrow ? 254 : (layout.pageClass === 'rect-page' ? 80 : 88)
+    if (layout.narrow) {
+      // Bands scroll the list while leaving its header and action buttons visible.
+      assert.ok(Math.max(rows.speedHeight, rows.unitHeight, rows.metricsHeight, rows.summaryHeight) <= layout.height - reserved)
+    } else assert.ok(occupied + reserved <= layout.height + 0.001, 'content fits ' + layout.pageClass)
+    assert.ok(rows.speedFont > 0 && rows.speedFont < rows.speedHeight)
+    assert.ok(rows.speedFont * 6 * 0.65 <= (layout.pageClass === 'round-page' ? 192 : 208))
+  }
 })

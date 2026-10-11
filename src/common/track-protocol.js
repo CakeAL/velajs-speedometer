@@ -1,5 +1,5 @@
 import { listTracks, TRACK_DIR, assertTrackUri, fileCall } from './files'
-import { toBytes, base64, crc32 } from './transfer-bytes'
+import { toBytes, base64, crc32 } from './bytes'
 
 export const PROTOCOL = 'speedometer.gpx'
 export const VERSION = 1

@@ -36,6 +36,19 @@ import { listTracks, fileCall, assertTrackUri } from '../../common/files'
 import { recoverTracks } from '../../common/recording'
 import { summarizeTrack } from '../../common/track-summary'
 
+function detachPage(page) {
+  if (page._visible) page._session.release(page._listener)
+  page._visible = false
+  for (const key of ['_unsubscribeStatus', '_unsubscribeSync']) {
+    if (page[key]) { page[key](); page[key] = null }
+  }
+}
+
+function clearSelection(page, message) {
+  page._version += 1
+  page.selectedUri = ''; page.confirmDelete = false; page.message = message
+}
+
 export default {
   private: {
     pageClass: 'round-page', narrow: false, files: [], selectedUri: '', selectedName: '',
@@ -43,6 +56,7 @@ export default {
   },
   onInit() {
     this._destroyed = false
+    this._visible = false
     this._version = 0
     this._session = this.$app.$def.session
     this._listener = () => {}
@@ -61,23 +75,15 @@ export default {
       const entry = this.files.filter(item => item.name === name)[0]
       if (!entry) return
       this.files = this.files.filter(item => item.name !== name)
-      if (this.selectedUri === entry.uri) {
-        this._version += 1; this.selectedUri = ''; this.confirmDelete = false
-      }
-      this.message = '文件已通过 AstroBox 删除'
+      if (this.selectedUri === entry.uri) clearSelection(this, '文件已通过 AstroBox 删除')
+      else this.message = '文件已通过 AstroBox 删除'
     })
     this.refresh()
   },
-  onHide() {
-    this._visible = false; this._session.release(this._listener)
-    if (this._unsubscribeStatus) { this._unsubscribeStatus(); this._unsubscribeStatus = null }
-    if (this._unsubscribeSync) { this._unsubscribeSync(); this._unsubscribeSync = null }
-  },
+  onHide() { detachPage(this) },
   onDestroy() {
     this._destroyed = true; this._version += 1
-    if (this._unsubscribeStatus) { this._unsubscribeStatus(); this._unsubscribeStatus = null }
-    if (this._visible) this._session.release(this._listener)
-    if (this._unsubscribeSync) { this._unsubscribeSync(); this._unsubscribeSync = null }
+    detachPage(this)
   },
   async refresh() {
     if (this.busy) return
@@ -115,14 +121,14 @@ export default {
       await fileCall(file, 'delete', { uri })
       if (this._destroyed) return
       this.files = this.files.filter(item => item.uri !== uri)
-      this._version += 1; this.selectedUri = ''; this.confirmDelete = false; this.message = '文件已删除'
+      clearSelection(this, '文件已删除')
     } catch (error) { if (!this._destroyed) this.message = error.message }
     finally { this.busy = false }
   },
   cancelDelete() { this.confirmDelete = false; this.message = '' },
   back() {
     if (this.busy) return
-    if (this.selectedUri) { this._version += 1; this.selectedUri = ''; this.confirmDelete = false; this.message = ''; return }
+    if (this.selectedUri) { clearSelection(this, ''); return }
     router.back()
   },
   onBackPress() { if (this.selectedUri) { this.back(); return true } return false }

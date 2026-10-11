@@ -1,4 +1,7 @@
+import { toBytes } from './bytes'
+
 export const TRACK_DIR = 'internal://files/speedometer/'
+export const READ_CHUNK_BYTES = 4096
 
 export function fileCall(api, method, options) {
   return new Promise((resolve, reject) => {
@@ -7,6 +10,12 @@ export function fileCall(api, method, options) {
         fail(data, code) { reject(new Error('文件操作失败 (' + code + ')')) } })
     } catch (error) { reject(error) }
   })
+}
+
+export async function readTrackChunk(api, uri, position) {
+  const data = await fileCall(api, 'readArrayBuffer', { uri, position, length: READ_CHUNK_BYTES })
+  // Some firmware returns no buffer at EOF instead of an empty ArrayBuffer.
+  return data.buffer ? toBytes(data.buffer) : new Uint8Array(0)
 }
 
 export async function ensureDirectory(api) {

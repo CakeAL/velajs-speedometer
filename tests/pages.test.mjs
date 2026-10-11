@@ -25,6 +25,28 @@ async function mockedModule(path, apis, ux = false) {
   finally { delete globalThis[key] }
 }
 
+test('app lifecycle owns GPS before pages exist and keeps it through app hide until destruction', async () => {
+  const fs = fakeFiles(); const calls = []
+  const { default: definition } = await mockedModule('../src/app.ux', {
+    '@system.file': fs.api,
+    '@system.geolocation': {
+      subscribe() { calls.push('subscribe') }, getLocation() { calls.push('snapshot') },
+      unsubscribe() { calls.push('unsubscribe') }
+    },
+    '@system.brightness': { setKeepScreenOn() {} },
+    '@system.interconnect': { instance() { return { connect() {}, close() {} } } }
+  }, true)
+  const app = { ...definition }
+  try {
+    app.onCreate()
+    assert.deepEqual(calls, ['subscribe', 'snapshot'], 'native GPS starts in app.onCreate without a page')
+    app.onHide(); app.onShow()
+    assert.deepEqual(calls, ['subscribe', 'snapshot'], 'hiding and waking do not reacquire GPS')
+    assert.equal(fs.data.size, 0)
+  } finally { app.onDestroy() }
+  assert.deepEqual(calls, ['subscribe', 'snapshot', 'unsubscribe'])
+})
+
 test('remote deletion removes the visible track and closes its selected detail', async () => {
   const fs = fakeFiles(); const recorder = createRecorder(fs.api, () => {})
   await recorder.start(100000); const uri = await recorder.finish()
@@ -103,3 +125,24 @@ test('track page reads and confirms deletion when file.list returns ' + format +
   vm.onHide(); vm.onDestroy(); assert.equal(owners, 0)
 })
 }
+
+test('recording errors appear in the visible notice and cannot update a destroyed page', async () => {
+  let reject
+  const session = {
+    snapshot: () => ({ speed: '--' }), acquire() {}, release() {},
+    toggleRecording: () => new Promise((resolve, fail) => { reject = fail })
+  }
+  const { createReadingPage } = await mockedModule('../src/common/page.js', {
+    '@system.device': { getInfo(o) { o.success({ screenWidth: 432, screenHeight: 514 }) } },
+    '@system.router': {}
+  })
+  const page = createReadingPage()
+  const vm = { ...page, ...page.private, $app: { $def: { session } } }
+  vm.onInit(); vm.onShow()
+  let operation = vm.toggleRecording()
+  reject(new Error('文件操作失败')); await operation
+  assert.equal(vm.recordNotice, '文件操作失败')
+  operation = vm.toggleRecording(); vm.onDestroy()
+  reject(new Error('迟到的错误')); await operation
+  assert.equal(vm.recordNotice, '文件操作失败')
+})

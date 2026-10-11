@@ -1,11 +1,5 @@
-import { fileCall, ensureDirectory, listTrackFiles, trackName, TRACK_DIR } from './files'
-
-function ascii(buffer) {
-  const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer
-  let text = ''
-  for (let i = 0; i < bytes.length; i += 1) text += String.fromCharCode(bytes[i])
-  return text
-}
+import { fileCall, ensureDirectory, listTrackFiles, trackName, TRACK_DIR, readTrackChunk, READ_CHUNK_BYTES } from './files'
+import { asciiText } from './bytes'
 
 export const GPX_END = '</trkseg></trk></gpx>'
 export const GPX_HEADER = '<?xml version="1.0" encoding="UTF-8"?>' +
@@ -93,10 +87,9 @@ export async function recoverTracks(api, activeUri) {
       // Repair a long interrupted recording using fixed-size chunks. Only
       // complete track points are copied; a partially written tail is discarded.
       for (;;) {
-        const data = await fileCall(api, 'readArrayBuffer', { uri: item.uri, position, length: 4096 })
-        const bytes = data.buffer instanceof ArrayBuffer ? new Uint8Array(data.buffer) : data.buffer
-        if (!bytes || !bytes.length) break
-        let text = carry + ascii(bytes)
+        const bytes = await readTrackChunk(api, item.uri, position)
+        if (!bytes.length) break
+        let text = carry + asciiText(bytes)
         position += bytes.length
         if (!initialized) {
           const headerEnd = text.indexOf('<trkseg>')
@@ -108,7 +101,7 @@ export async function recoverTracks(api, activeUri) {
         const end = text.lastIndexOf('</trkpt>')
         if (end >= 0) await fileCall(api, 'writeText', { uri: repair, text: text.slice(0, end + 8).replace(/[\r\n]/g, ''), append: true })
         carry = text.slice(end >= 0 ? end + 8 : 0).slice(-512)
-        if (bytes.length < 4096) break
+        if (bytes.length < READ_CHUNK_BYTES) break
       }
       if (!initialized) throw new Error('文件为空')
       await fileCall(api, 'writeText', { uri: repair, text: GPX_END, append: true })

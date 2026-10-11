@@ -4,22 +4,22 @@ import { emptyStats, addSpeed, statsView } from './statistics'
 
 const STATUS = {
   idle: '等待定位', locating: 'GPS 搜星中', live: 'GPS 已定位', stale: '等待 GPS 更新',
-  paused: '定位已暂停', timeout: '超时 · 自动重试', denied: '请允许定位权限',
+  paused: '定位已暂停', timeout: '搜星较久 · 继续等待', denied: '请允许定位权限',
   unsupported: 'GPS 接口不可用', error: '失败 · 自动重试'
 }
 
-export const SCREEN_HOLD_MS = 10000
+const SCREEN_HOLD_MS = 10000
 
 export function createSession(deps, clock) {
   const time = clock || { now: () => Date.now(), setInterval, clearInterval, setTimeout, clearTimeout }
-  let state = { phase: 'idle', fix: null, updatedAt: null, message: '请在室外等待 GPS 定位' }
+  let state = { phase: 'idle', fix: null, updatedAt: null }
   let stats = emptyStats()
   let unitIndex = 0
   let listeners = []
   let foreground = true
+  let trackingRequested = false
   let tickTimer = null
   let retryTimer = null
-  let releaseTimer = null
   let screenTimer = null
   let lastSecond = null
   let disposed = false
@@ -35,14 +35,8 @@ export function createSession(deps, clock) {
       statusColor: readings.tone === 'good' ? '#7ef7c5' : '#f2bf68',
       recording: record.recording, saving: record.saving,
       recordText: record.saving ? '保存中' : (record.recording ? '结束' : '记录'),
-      recordInfo: record.recording ? duration + ' · ' + record.points + ' 点' : record.message,
       recordDuration: duration, recordPoints: record.points,
-      recordNotice: record.recording ? '' : record.message,
-      detailNote: readings.age,
-      latitudeNumber: readings.latitudeDetail === '--' ? '--' : readings.latitudeDetail.split('°')[0],
-      latitudeDirection: readings.latitudeDetail === '--' ? '纬度' : (readings.latitudeDetail.indexOf('S') >= 0 ? '南纬 S' : '北纬 N'),
-      longitudeNumber: readings.longitudeDetail === '--' ? '--' : readings.longitudeDetail.split('°')[0],
-      longitudeDirection: readings.longitudeDetail === '--' ? '经度' : (readings.longitudeDetail.indexOf('W') >= 0 ? '西经 W' : '东经 E') }
+      recordNotice: record.recording ? '' : record.message }
   }
   function emit() {
     if (!foreground) return
@@ -75,15 +69,16 @@ export function createSession(deps, clock) {
   }
   const recorder = createRecorder(deps.file, next => {
     record = next; emit()
-    // A finished or failed background recording no longer needs GPS keepalive.
-    if (!wanted() && tickTimer !== null) stop()
   })
   function wanted() {
-    return !disposed && ((foreground && listeners.length > 0) || record.recording || record.saving)
+    // GPS belongs to the app, not to a visible page or an active GPX recording.
+    return !disposed && trackingRequested
   }
   function clearRetry() { if (retryTimer !== null) time.clearTimeout(retryTimer); retryTimer = null }
   function scheduleRetry() {
-    if (retryTimer !== null || !wanted()) return
+    // A pending fix or a quiet stream is not a failed subscription. Unsubscribing
+    // here can interrupt a cold start; only restart after a native stream error.
+    if (retryTimer !== null || !wanted() || tracker.isListening()) return
     const delay = state.phase === 'denied' || state.phase === 'unsupported' ? 15000 : 5000
     retryTimer = time.setTimeout(() => { retryTimer = null; if (wanted()) tracker.retry() }, delay)
   }
@@ -105,7 +100,6 @@ export function createSession(deps, clock) {
       if (fresh) stats = addSpeed(stats, state.fix.speed)
       recorder.sample(state.fix, now, fresh)
     }
-    if (state.phase === 'stale' && state.updatedAt !== null && now - state.updatedAt >= 60000) scheduleRetry()
     emit()
   }
   function start() {
@@ -123,27 +117,28 @@ export function createSession(deps, clock) {
 
   return {
     snapshot: view,
+    activate() {
+      if (disposed) return
+      trackingRequested = true
+      // Called from app.onCreate so Vela owns the native subscription at app scope.
+      start()
+    },
     acquire(listener) {
-      if (releaseTimer !== null) time.clearTimeout(releaseTimer)
-      releaseTimer = null
+      if (disposed) return
       const visibleAgain = !foreground || listeners.length === 0
       enterForeground()
       if (listeners.indexOf(listener) < 0) listeners.push(listener)
       listener(view())
       if (visibleAgain) holdScreenBriefly()
-      start()
     },
     release(listener) {
       listeners = listeners.filter(item => item !== listener)
-      if (releaseTimer !== null) time.clearTimeout(releaseTimer)
-      // Allow router handoff to the next page without resetting the GPS stream.
-      releaseTimer = time.setTimeout(() => { releaseTimer = null; if (!wanted()) stop() }, 150)
     },
     changeUnit() { unitIndex = (unitIndex + 1) % UNITS.length; emit() },
     async toggleRecording() {
       if (record.saving) return
       if (record.recording) return recorder.finish()
-      await recorder.start(time.now()); start()
+      await recorder.start(time.now())
     },
     activeUri() {
       const current = recorder.snapshot()
@@ -161,14 +156,12 @@ export function createSession(deps, clock) {
     suspend() {
       foreground = false
       releaseScreen()
-      // An active geolocation subscription declared as a background feature
-      // keeps the app alive. Keep sampling and writing while recording/saving.
-      if (!wanted()) stop()
+      // Keep the declared background geolocation feature running even when not
+      // recording. Only the display sleeps; fresh fixes stay available on wake.
     },
     async dispose() {
       disposed = true
-      if (releaseTimer !== null) time.clearTimeout(releaseTimer)
-      releaseTimer = null
+      trackingRequested = false
       foreground = false
       stop()
       if (record.recording) {

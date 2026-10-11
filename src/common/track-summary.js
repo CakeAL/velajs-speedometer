@@ -1,11 +1,5 @@
-import { assertTrackUri, fileCall } from './files'
-
-export function bytesText(buffer) {
-  const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer
-  let text = ''
-  for (let i = 0; i < bytes.length; i += 1) text += String.fromCharCode(bytes[i])
-  return text
-}
+import { assertTrackUri, readTrackChunk, READ_CHUNK_BYTES } from './files'
+import { asciiText } from './bytes'
 
 // GPX produced by this app is ASCII. Inspect a bounded window of the file so
 // opening a long recording does not load the whole XML into the watch's RAM.
@@ -20,10 +14,9 @@ export async function summarizeTrack(api, uri) {
   let maxAltitude = null
   let complete = false
   for (;;) {
-    const result = await fileCall(api, 'readArrayBuffer', { uri, position, length: 4096 })
-    const bytes = result.buffer instanceof ArrayBuffer ? new Uint8Array(result.buffer) : result.buffer
-    if (!bytes || !bytes.length) break
-    const text = carry + bytesText(bytes)
+    const bytes = await readTrackChunk(api, uri, position)
+    if (!bytes.length) break
+    const text = carry + asciiText(bytes)
     let consumed = 0
     const tags = /<trkpt\s|<time>([^<]+)<\/time>|<ele>([^<]+)<\/ele>|<\/gpx>/g
     let match
@@ -42,7 +35,7 @@ export async function summarizeTrack(api, uri) {
     }
     carry = text.slice(consumed).slice(-256)
     position += bytes.length
-    if (bytes.length < 4096) break
+    if (bytes.length < READ_CHUNK_BYTES) break
   }
   const duration = firstTime && lastTime ? Math.max(0, Math.floor((Date.parse(lastTime) - Date.parse(firstTime)) / 1000)) : 0
   return { points, duration: Math.floor(duration / 60) + ' 分 ' + duration % 60 + ' 秒',

@@ -2,7 +2,21 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { load, moduleUrl, fakeFiles } from './helpers.mjs'
-const { resolveTrackUri, listTracks, assertTrackUri, TRACK_DIR } = await load('../src/common/files.js')
+const { resolveTrackUri, listTracks, assertTrackUri, readTrackChunk, TRACK_DIR } = await load('../src/common/files.js')
+
+test('bounded GPX reads accept both native buffer forms and an omitted EOF buffer', async () => {
+  const bytes = new Uint8Array([60, 103, 112, 120, 62])
+  for (const buffer of [bytes, bytes.buffer, undefined]) {
+    const api = { readArrayBuffer(options) {
+      assert.equal(options.uri, TRACK_DIR + 'track-test.gpx')
+      assert.equal(options.position, 8192)
+      assert.ok(options.length <= 4096, 'long tracks must be read with bounded memory')
+      options.success({ buffer })
+    } }
+    const chunk = await readTrackChunk(api, TRACK_DIR + 'track-test.gpx', 8192)
+    assert.deepEqual([...chunk], buffer ? [...bytes] : [])
+  }
+})
 
 test('resolves only direct track files inside the app directory', () => {
   for (const prefix of ['', './', 'speedometer/', TRACK_DIR, TRACK_DIR + '/', TRACK_DIR + '//']) {

@@ -10,7 +10,7 @@ export const UNITS = [
   { label: 'mph', factor: 1 / 1.609344 }
 ]
 
-export function finiteNumber(value) {
+function finiteNumber(value) {
   return typeof value === 'number' && isFinite(value)
 }
 
@@ -48,10 +48,12 @@ export function normalizeLocation(data) {
   return fix.speed !== null || fix.latitude !== null || fix.longitude !== null || fix.altitude !== null ? fix : null
 }
 
-export function coordinate(value, latitude, digits) {
-  if (!finiteNumber(value)) return '--'
-  const direction = latitude ? (value < 0 ? 'S' : 'N') : (value < 0 ? 'W' : 'E')
-  return Math.abs(value).toFixed(digits) + '° ' + direction
+function coordinateView(value, latitude) {
+  return {
+    number: finiteNumber(value) ? Math.abs(value).toFixed(6) : '--',
+    direction: !finiteNumber(value) ? (latitude ? '纬度' : '经度') :
+      (latitude ? (value < 0 ? '南纬 S' : '北纬 N') : (value < 0 ? '西经 W' : '东经 E'))
+  }
 }
 
 export function locationView(state, unitIndex, now) {
@@ -65,18 +67,16 @@ export function locationView(state, unitIndex, now) {
   const speed = tracking && state.fix && state.fix.speed !== null ?
     formatCurrentSpeed(ageMs >= SPEED_STALE_AFTER ? 0 : state.fix.speed, unitIndex) : '--'
   const speedStale = tracking && ageMs >= SPEED_STALE_AFTER
+  const latitude = coordinateView(fix && fix.latitude, true)
+  const longitude = coordinateView(fix && fix.longitude, false)
   return {
     speed,
     unit: unit.label,
     altitude: fix && fix.altitude !== null ? fix.altitude.toFixed(0) : '--',
-    latitude: coordinate(fix && fix.latitude, true, 5),
-    longitude: coordinate(fix && fix.longitude, false, 5),
-    latitudeDetail: coordinate(fix && fix.latitude, true, 6),
-    longitudeDetail: coordinate(fix && fix.longitude, false, 6),
+    latitudeNumber: latitude.number, latitudeDirection: latitude.direction,
+    longitudeNumber: longitude.number, longitudeDirection: longitude.direction,
     accuracy: fix && fix.accuracy !== null ? '±' + Math.round(fix.accuracy) + ' m' : '--',
-    age: state.updatedAt === null ? '尚未获取位置' : (fresh ? Math.floor(ageMs / 1000) + ' 秒前更新' : '等待新的位置'),
-    hint: speedStale ? '5 秒未更新，速度已归零' : (fresh ? (fix.speed === null ? '设备未返回速度' :
-      (fix.accuracy !== null && fix.accuracy > 50 ? '定位精度较低' : '点击单位切换')) : state.message),
+    detailNote: state.updatedAt === null ? '尚未获取位置' : (fresh ? Math.floor(ageMs / 1000) + ' 秒前更新' : '等待新的位置'),
     tone: fresh && !speedStale ? (fix.accuracy !== null && fix.accuracy > 50 ? 'warning' : 'good') :
       (state.phase === 'paused' ? 'muted' : 'warning')
   }
@@ -86,7 +86,7 @@ export function locationView(state, unitIndex, now) {
 // The tick updates freshness only; it never replaces the subscription with polling.
 export function createLocationTracker(api, onChange, clock) {
   const time = clock || { now: () => Date.now(), setInterval, clearInterval }
-  let state = { phase: 'idle', fix: null, updatedAt: null, message: '等待定位' }
+  let state = { phase: 'idle', fix: null, updatedAt: null }
   let active = false
   let generation = 0
   let timer = null
@@ -112,26 +112,22 @@ export function createLocationTracker(api, onChange, clock) {
     if (!terminal && state.fix) return
     if (terminal) cleanup()
     let phase = 'error'
-    let message = '定位失败，请重试'
-    if (code === 203) { phase = 'unsupported'; message = '设备未开放 GPS 定位接口' }
-    if (code === 204) { phase = 'timeout'; message = '定位超时，请到开阔处重试' }
-    if ([201, 207, 400, 402].indexOf(code) >= 0) { phase = 'denied'; message = '请在设置中允许定位权限' }
-    state = { ...state, phase, message }
+    if (code === 203) phase = 'unsupported'
+    if (code === 204) phase = terminal ? 'error' : 'timeout'
+    if ([201, 207, 400, 402].indexOf(code) >= 0) phase = 'denied'
+    if (!terminal && subscribed && phase !== 'timeout' && phase !== 'denied') {
+      phase = 'locating'
+    }
+    state = { ...state, phase }
     emit()
   }
 
   function accept(data) {
     const fix = normalizeLocation(data)
-    if (!fix) {
-      // Do not let invalid callbacks extend the lifetime of an old speed reading.
-      if (!state.fix) {
-        state = { ...state, message: '等待有效的 GPS 数据' }
-        emit()
-      }
-      return
-    }
+    // Invalid callbacks must not extend the lifetime of an old speed reading.
+    if (!fix) return
     revision += 1
-    state = { phase: 'live', fix, updatedAt: time.now(), message: '' }
+    state = { phase: 'live', fix, updatedAt: time.now() }
     emit()
   }
 
@@ -139,14 +135,16 @@ export function createLocationTracker(api, onChange, clock) {
     if (!active) return
     const age = state.updatedAt === null ? null : time.now() - state.updatedAt
     if (age !== null && age >= SPEED_STALE_AFTER && state.phase === 'live') {
-      state = { ...state, phase: 'stale', message: '等待新的 GPS 数据' }
+      state = { ...state, phase: 'stale' }
     } else if (state.phase === 'locating' && time.now() - startedAt >= INITIAL_TIMEOUT) {
-      state = { ...state, phase: 'timeout', message: '定位超时，请到开阔处重试' }
-    }
+      state = { ...state, phase: 'timeout' }
+    } else return
+    // Session's clock refreshes the visible values; notify only on state changes.
     emit()
   }
 
   return {
+    isListening() { return active && subscribed },
     start() {
       if (active) return
       active = true
@@ -155,21 +153,11 @@ export function createLocationTracker(api, onChange, clock) {
       startedAt = time.now()
       const token = generation
       const current = () => active && token === generation
-      state = { phase: 'locating', fix: null, updatedAt: null, message: '请在室外等待 GPS 定位' }
+      state = { phase: 'locating', fix: null, updatedAt: null }
       emit()
       timer = time.setInterval(tick, 1000)
-      // Start both immediately, as the reference does. Neither waits for the
-      // other; a late snapshot must not overwrite a newer subscription fix.
-      try {
-        api.getLocation({
-          timeout: INITIAL_TIMEOUT,
-          success(data) { if (current() && revision === 0) accept(data) },
-          fail(data, code) { if (current()) fail(code, false) }
-        })
-      } catch (error) {
-        if (current()) fail(typeof api.getLocation === 'function' ? -1 : 203, false)
-      }
-      if (!current()) return
+      // Establish the long-lived background feature before requesting a snapshot.
+      // Neither waits for a fix; a late snapshot cannot overwrite the stream.
       if (typeof api.subscribe !== 'function') { fail(203, true); return }
       subscribed = true
       try {
@@ -180,10 +168,20 @@ export function createLocationTracker(api, onChange, clock) {
       } catch (error) {
         if (current()) fail(-1, true)
       }
+      if (!current()) return
+      try {
+        api.getLocation({
+          timeout: INITIAL_TIMEOUT,
+          success(data) { if (current() && revision === 0) accept(data) },
+          fail(data, code) { if (current()) fail(code, false) }
+        })
+      } catch (error) {
+        if (current()) fail(typeof api.getLocation === 'function' ? -1 : 203, false)
+      }
     },
     stop() {
       cleanup()
-      state = { ...state, phase: 'paused', message: '定位已暂停' }
+      state = { ...state, phase: 'paused' }
       emit()
     },
     retry() {

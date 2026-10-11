@@ -6,6 +6,14 @@ export function toBytes(buffer) {
   throw new Error('无效的文件数据')
 }
 
+// App-generated GPX is ASCII, so chunk boundaries cannot split a character.
+export function asciiText(buffer) {
+  const bytes = toBytes(buffer)
+  let text = ''
+  for (let i = 0; i < bytes.length; i += 1) text += String.fromCharCode(bytes[i])
+  return text
+}
+
 export function base64(bytes) {
   let result = ''
   for (let i = 0; i < bytes.length; i += 3) {

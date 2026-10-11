@@ -11,6 +11,7 @@ export default {
   onCreate() {
     this.clock = createAppClock()
     this.session = createSession({ geolocation, brightness, file }, this.clock)
+    this.session.activate()
     this.trackSync = createTrackSync(interconnect, file, this.session, this.clock)
     this.trackSync.start()
   },

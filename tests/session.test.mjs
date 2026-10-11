@@ -12,23 +12,38 @@ function harness(saved = '') {
     brightness: { setKeepScreenOn(o) { screen.push(o.keepScreenOn) } },
     geolocation: { getLocation(o) { requests.push(o) }, subscribe(o) { subscriptions.push(o) }, unsubscribe() { unsubscribes++ } }
   }, clock)
+  session.activate()
   return { session, clock, fs, subscriptions, requests, screen, get unsubscribes() { return unsubscribes }, get stored() { return stored }, get storageCalls() { return storageCalls } }
 }
 
-test('navigation shares one live GPS stream and stops when the app leaves foreground', async () => {
-  const h = harness(); const home = () => {}; const details = () => {}
+test('unrecorded GPS stays live through page hide and background, so wake immediately displays the newest speed', async () => {
+  const h = harness(); const values = []; const home = value => values.push(value); const details = () => {}
+  assert.equal(h.subscriptions.length, 1, 'GPS starts before a page attaches')
+  h.session.activate(); assert.equal(h.subscriptions.length, 1)
   h.session.acquire(home); h.subscriptions[0].callback(sample)
-  h.session.release(home); h.session.acquire(details); h.clock.advance(200)
-  assert.equal(h.subscriptions.length, 1); assert.equal(h.session.snapshot().speed, '36')
-  await h.session.suspend()
-  assert.equal(h.unsubscribes, 1); assert.equal(h.screen.at(-1), false); assert.equal(h.clock.tasks, 0)
-  h.session.acquire(home); assert.equal(h.subscriptions.length, 2)
-  h.subscriptions[0].callback({ ...sample, speed: 50 }); assert.equal(h.session.snapshot().speed, '--')
-  await h.session.dispose(); assert.equal(h.clock.tasks, 0)
+  h.session.release(home); h.clock.advance(500)
+  h.session.acquire(details); assert.equal(h.subscriptions.length, 1)
+  h.session.release(details); h.session.suspend(); h.clock.advance(20000)
+  assert.equal(h.unsubscribes, 0); assert.equal(h.screen.at(-1), false)
+  const visibleUpdates = values.length
+  for (let i = 0; i < 20; i++) {
+    h.subscriptions[0].callback({ ...sample, speed: 20 })
+    h.clock.advance(1000)
+  }
+  assert.equal(values.length, visibleUpdates, 'background fixes do not update hidden pages')
+  h.subscriptions[0].callback({ ...sample, speed: 5 })
+  h.session.resume(); h.session.acquire(home)
+  assert.equal(values.at(-1).speed, '18', 'the first visible frame uses the background fix')
+  assert.equal(h.subscriptions.length, 1); assert.equal(h.requests.length, 1)
+  assert.equal(h.fs.data.size, 0); assert.equal(h.fs.writes.length, 0)
+  await h.session.dispose(); assert.equal(h.unsubscribes, 1); assert.equal(h.clock.tasks, 0)
+  h.subscriptions[0].callback(sample); h.session.activate(); h.session.resume(); h.clock.advance(10000)
+  assert.equal(h.subscriptions.length, 1); assert.equal(h.session.snapshot().speed, '--')
 })
 
-test('location errors retry automatically, ignore old callbacks and stop retrying on exit', async () => {
-  const h = harness(); h.session.acquire(() => {})
+test('native subscription errors retry in background, ignore old callbacks and stop retrying on destruction', async () => {
+  const h = harness(); const listener = () => {}; h.session.acquire(listener)
+  h.session.release(listener); h.session.suspend()
   h.subscriptions[0].fail('error', 1000)
   assert.match(h.session.snapshot().statusText, /自动重试/)
   h.clock.advance(4999); assert.equal(h.subscriptions.length, 1)
@@ -36,8 +51,22 @@ test('location errors retry automatically, ignore old callbacks and stop retryin
   h.subscriptions[0].callback(sample); assert.equal(h.session.snapshot().speed, '--')
   h.subscriptions[1].callback(sample); assert.equal(h.session.snapshot().speed, '36')
   h.subscriptions[1].fail('denied', 400)
-  await h.session.suspend(); h.clock.advance(30000)
-  assert.equal(h.subscriptions.length, 2); await h.session.dispose()
+  await h.session.dispose(); h.clock.advance(30000)
+  assert.equal(h.subscriptions.length, 2); assert.equal(h.clock.tasks, 0)
+})
+
+test('slow first fix and a long signal gap do not cancel an existing GPS subscription', async () => {
+  const h = harness(); h.session.acquire(() => {})
+  h.requests[0].fail('timeout', 204)
+  assert.match(h.session.snapshot().statusText, /继续等待/)
+  h.clock.advance(180000)
+  assert.equal(h.subscriptions.length, 1); assert.equal(h.unsubscribes, 0)
+  h.subscriptions[0].callback(sample); assert.equal(h.session.snapshot().speed, '36')
+  h.clock.advance(180000)
+  assert.equal(h.subscriptions.length, 1); assert.equal(h.unsubscribes, 0)
+  assert.equal(h.session.snapshot().speed, '0', 'old measurements are still marked stale')
+  h.subscriptions[0].callback({ ...sample, speed: 5 }); assert.equal(h.session.snapshot().speed, '18')
+  await h.session.dispose()
 })
 
 test('statistics stay in memory, ignore old stored values and sample only fresh GPS seconds including stops', async () => {
@@ -145,7 +174,7 @@ test('returning from background preserves the recording and stream and starts a 
   await h.session.dispose()
 })
 
-test('finishing or failing a background recording releases GPS and all session timers', async () => {
+test('finishing or failing a background recording keeps GPS live until app destruction', async () => {
   for (const fail of [false, true]) {
     const h = harness(); const listener = () => {}
     h.session.acquire(listener); h.subscriptions[0].callback(sample)
@@ -154,8 +183,10 @@ test('finishing or failing a background recording releases GPS and all session t
     if (fail) { h.fs.failNextWrite(); h.clock.advance(1000); await settle() }
     else await h.session.toggleRecording()
     assert.equal(h.session.snapshot().recording, false)
-    assert.equal(h.unsubscribes, 1); assert.equal(h.clock.tasks, 0)
-    assert.equal(h.screen.at(-1), false)
-    await h.session.dispose()
+    assert.equal(h.unsubscribes, 0); assert.ok(h.clock.tasks > 0)
+    h.subscriptions[0].callback({ ...sample, speed: 5 })
+    h.session.resume(); h.session.acquire(listener)
+    assert.equal(h.session.snapshot().speed, '18'); assert.equal(h.subscriptions.length, 1)
+    await h.session.dispose(); assert.equal(h.unsubscribes, 1); assert.equal(h.clock.tasks, 0)
   }
 })
