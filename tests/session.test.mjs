@@ -328,6 +328,49 @@ test('touching the UI restarts its idle delay and leaving the app clears the ove
   assert.equal(h.clock.tasks, 0); assert.equal(h.screen.at(-1), false)
 })
 
+test('missing, throwing or failing keep-screen-on APIs cannot block the black overlay or GPX recording', async () => {
+  for (const [brightness, expected] of [
+    [undefined, /未提供常亮接口/],
+    [{}, /未提供常亮接口/],
+    [{ setKeepScreenOn() { throw new Error('native call unavailable') } }, /native call unavailable/],
+    [{ setKeepScreenOn(o) { o.fail('unsupported', 203) } }, /常亮未生效 \(203\)/],
+    [{ setKeepScreenOn(o) { o.fail() } }, /常亮未生效/]
+  ]) {
+    const clock = fakeClock(); const fs = fakeFiles(); let stream
+    const session = createSession({ file: fs.api, brightness,
+      geolocation: { subscribe(options) { stream = options }, unsubscribe() {} }
+    }, clock)
+    session.activate(); session.acquire(() => {})
+    session.changeScreenMode(); session.changeScreenMode()
+    await session.toggleRecording()
+    assert.match(session.snapshot().screenError, expected)
+    for (let i = 0; i < 10; i++) {
+      stream.callback(sample); clock.advance(1000); await settle()
+    }
+    assert.equal(session.snapshot().screenCovered, true)
+    assert.equal(session.snapshot().recordPoints, 10)
+    assert.equal(session.snapshot().average, '36.0')
+    session.interact(); assert.equal(session.snapshot().screenCovered, false)
+    assert.equal(session.snapshot().recording, true)
+    await session.dispose(); assert.equal(clock.tasks, 0)
+  }
+})
+
+test('a later successful keep-screen-on request clears its warning without changing overlay timing', async () => {
+  const clock = fakeClock(); const fs = fakeFiles(); let failed = true
+  const session = createSession({ file: fs.api,
+    brightness: { setKeepScreenOn(o) { if (failed) o.fail('unavailable', 200); else o.success() } },
+    geolocation: { subscribe() {}, unsubscribe() {} }
+  }, clock)
+  session.activate(); session.acquire(() => {})
+  clock.advance(10000)
+  assert.equal(session.snapshot().screenCovered, true); assert.match(session.snapshot().screenError, /200/)
+  failed = false; session.interact()
+  assert.equal(session.snapshot().screenError, ''); assert.equal(session.snapshot().screenCovered, false)
+  clock.advance(10000); assert.equal(session.snapshot().screenCovered, true)
+  await session.dispose()
+})
+
 test('recorded background lifecycle notes diagnose interruption without creating other persisted data', async () => {
   const h = harness(); h.session.acquire(() => {})
   h.subscriptions[0].callback(sample); await h.session.toggleRecording()

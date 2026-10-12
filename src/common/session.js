@@ -56,12 +56,18 @@ export function createSession(deps, clock) {
   function keepScreenOn(enabled) {
     function failed(data, code) {
       if (disposed) return
-      screenError = '常亮设置失败' + (code === undefined ? '' : ' (' + code + ')')
+      const detail = typeof data === 'string' ? data.replace(/\s+/g, ' ').slice(0, 64) : ''
+      screenError = '常亮未生效' + (code === undefined ? '' : ' (' + code + ')') + (detail ? ' · ' + detail : '')
       emit()
+    }
+    if (!deps.brightness || typeof deps.brightness.setKeepScreenOn !== 'function') {
+      screenError = '当前环境未提供常亮接口'
+      emit()
+      return
     }
     try { deps.brightness.setKeepScreenOn({ keepScreenOn: enabled,
       success() { if (!disposed && screenError) { screenError = ''; emit() } }, fail: failed }) }
-    catch (error) { failed() }
+    catch (error) { failed(error.message) }
   }
   function releaseScreen() {
     if (screenTimer !== null) time.clearTimeout(screenTimer)
@@ -78,7 +84,7 @@ export function createSession(deps, clock) {
     if (screenMode === 1 || (screenMode === 0 && (record.recording || record.saving))) return
     screenTimer = time.setTimeout(() => {
       screenTimer = null
-      if (!foreground || disposed || screenError) return
+      if (!foreground || disposed) return
       // Keep the native screen awake. This is an in-app overlay, so GPS,
       // recording and statistics continue in the same foreground session.
       screenCovered = true
