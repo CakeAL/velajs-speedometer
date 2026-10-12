@@ -88,7 +88,7 @@ export function locationView(state, unitIndex, now) {
 
 // Use the reference app's one initial snapshot plus continuous subscription.
 // The tick updates freshness only; it never replaces the subscription with polling.
-export function createLocationTracker(api, onChange, clock) {
+export function createLocationTracker(api, onChange, clock, options = {}) {
   const time = clock || { now: () => Date.now(), setInterval, clearInterval }
   let state = { phase: 'idle', fix: null, updatedAt: null }
   let active = false
@@ -159,7 +159,7 @@ export function createLocationTracker(api, onChange, clock) {
       generation += 1
       revision = 0
       startedAt = time.now()
-      diagnostics.snapshot = '等待返回'
+      diagnostics.snapshot = options.initialSnapshot === false ? '等待补充请求' : '等待返回'
       diagnostics.error = ''
       const token = generation
       const current = () => active && token === generation
@@ -168,19 +168,21 @@ export function createLocationTracker(api, onChange, clock) {
       timer = time.setInterval(tick, 1000)
       // Request the first fix and attach the stream immediately. This ordering
       // is a compatibility trial, not a documented guarantee of faster GPS.
-      try {
-        api.getLocation({
-          timeout: INITIAL_TIMEOUT,
-          success(data) {
-            if (!current()) return
-            diagnostics.snapshot = '已返回'
-            if (revision === 0) accept(data)
-            else emit()
-          },
-          fail(data, code) { if (current()) fail(code, false, data) }
-        })
-      } catch (error) {
-        if (current()) fail(typeof api.getLocation === 'function' ? -1 : 203, false, error.message)
+      if (options.initialSnapshot !== false) {
+        try {
+          api.getLocation({
+            timeout: INITIAL_TIMEOUT,
+            success(data) {
+              if (!current()) return
+              diagnostics.snapshot = '已返回'
+              if (revision === 0) accept(data)
+              else emit()
+            },
+            fail(data, code) { if (current()) fail(code, false, data) }
+          })
+        } catch (error) {
+          if (current()) fail(typeof api.getLocation === 'function' ? -1 : 203, false, error.message)
+        }
       }
       if (!current()) return
       if (typeof api.subscribe !== 'function') { fail(203, true); return }

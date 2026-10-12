@@ -41,12 +41,12 @@ test('app starts GPS on first foreground entry and keeps it through app hide unt
     app.onCreate()
     assert.deepEqual(calls, [], 'creation does not request GPS before the app becomes visible')
     app.onShow()
-    assert.deepEqual(calls, ['snapshot', 'subscribe'], 'foreground entry requests the initial fix before subscribing')
+    assert.deepEqual(calls, ['subscribe'], 'continuous background positioning starts without a competing snapshot')
     app.onHide(); app.onShow()
-    assert.deepEqual(calls, ['snapshot', 'subscribe'], 'hiding and waking do not reacquire GPS')
+    assert.deepEqual(calls, ['subscribe'], 'hiding and waking do not reacquire GPS')
     assert.equal(fs.data.size, 0)
   } finally { app.onDestroy() }
-  assert.deepEqual(calls, ['snapshot', 'subscribe', 'unsubscribe'])
+  assert.deepEqual(calls, ['subscribe', 'unsubscribe'])
 })
 
 test('remote deletion removes the visible track and closes its selected detail', async () => {

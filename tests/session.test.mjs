@@ -34,7 +34,7 @@ test('unrecorded GPS stays live through page hide and background, so wake immedi
   h.subscriptions[0].callback({ ...sample, speed: 5 })
   h.session.resume(); h.session.acquire(home)
   assert.equal(values.at(-1).speed, '18', 'the first visible frame uses the background fix')
-  assert.equal(h.subscriptions.length, 1); assert.equal(h.requests.length, 1)
+  assert.equal(h.subscriptions.length, 1); assert.equal(h.requests.length, 0)
   assert.equal(h.fs.data.size, 0); assert.equal(h.fs.writes.length, 0)
   await h.session.dispose(); assert.equal(h.unsubscribes, 1); assert.equal(h.clock.tasks, 0)
   h.subscriptions[0].callback(sample); h.session.activate(); h.session.resume(); h.clock.advance(10000)
@@ -57,7 +57,7 @@ test('native subscription errors retry in background, ignore old callbacks and s
 
 test('slow first fix and a long signal gap do not cancel an existing GPS subscription', async () => {
   const h = harness(); h.session.acquire(() => {})
-  h.requests[0].fail('timeout', 204)
+  h.clock.advance(60000)
   assert.match(h.session.snapshot().statusText, /继续等待/)
   h.clock.advance(180000)
   assert.equal(h.subscriptions.length, 1); assert.equal(h.unsubscribes, 0)
@@ -191,18 +191,18 @@ test('finishing or failing a background recording keeps GPS live until app destr
   }
 })
 
-test('a synchronous initial timeout cannot later tear down the successfully attached GPS stream', async () => {
-  const clock = fakeClock(); const fs = fakeFiles(); let streams = 0; let unsubscribes = 0
+test('continuous sessions do not start a one-shot request before the background subscription', async () => {
+  const clock = fakeClock(); const fs = fakeFiles(); let streams = 0; let unsubscribes = 0; let requests = 0
   const session = createSession({
     file: fs.api, brightness: { setKeepScreenOn() {} },
     geolocation: {
-      getLocation(options) { options.fail('timeout', 204) },
+      getLocation(options) { requests++; options.fail('timeout', 204) },
       subscribe() { streams++ }, unsubscribe() { unsubscribes++ }
     }
   }, clock)
   session.activate(); clock.advance(180000)
   assert.equal(streams, 1); assert.equal(unsubscribes, 0)
-  assert.match(session.snapshot().gpsError, /单次定位错误 204/)
+  assert.equal(requests, 0)
   assert.equal(fs.data.size, 0, 'diagnostics remain in memory only')
   await session.dispose(); assert.equal(unsubscribes, 1); assert.equal(clock.tasks, 0)
 })

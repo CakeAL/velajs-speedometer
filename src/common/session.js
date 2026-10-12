@@ -92,7 +92,7 @@ export function createSession(deps, clock) {
       if (next.fix.speed !== null) stats.max = Math.max(stats.max, next.fix.speed)
     } else if (['error', 'timeout', 'denied', 'unsupported'].indexOf(next.phase) >= 0) scheduleRetry()
     emit()
-  }, time)
+  }, time, { initialSnapshot: false })
   function tick() {
     const now = time.now()
     const second = Math.floor(now / 1000)
