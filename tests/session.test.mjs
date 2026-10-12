@@ -87,7 +87,7 @@ test('statistics stay in memory, ignore old stored values and sample only fresh 
   await restarted.session.dispose(); assert.equal(restarted.storageCalls, 0)
 })
 
-test('reopening without recording resets statistics in either app/page lifecycle order, while navigation preserves them', async () => {
+test('screen-off and background return preserve statistics in either lifecycle order until app destruction', async () => {
   for (const appFirst of [true, false]) {
     const h = harness(); const home = () => {}; const details = () => {}
     h.session.acquire(home); h.subscriptions[0].callback(sample); h.clock.advance(1000)
@@ -96,9 +96,9 @@ test('reopening without recording resets statistics in either app/page lifecycle
     h.session.release(details); h.session.suspend()
     if (appFirst) { h.session.resume(); h.session.acquire(home) }
     else { h.session.acquire(home); h.session.resume() }
-    assert.equal(h.session.snapshot().average, '--'); assert.equal(h.session.snapshot().maximum, '--')
+    assert.equal(h.session.snapshot().average, '36.0'); assert.equal(h.session.snapshot().maximum, '36.0')
     h.subscriptions.at(-1).callback({ ...sample, speed: 5 }); h.clock.advance(1000)
-    assert.equal(h.session.snapshot().average, '18.0'); assert.equal(h.session.snapshot().maximum, '18.0')
+    assert.equal(h.session.snapshot().average, '27.0'); assert.equal(h.session.snapshot().maximum, '36.0')
     await h.session.dispose(); assert.equal(h.storageCalls, 0)
     assert.equal(h.fs.data.size, 0)
   }

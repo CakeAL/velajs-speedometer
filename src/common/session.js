@@ -59,12 +59,8 @@ export function createSession(deps, clock) {
     }, SCREEN_HOLD_MS)
   }
   function enterForeground() {
-    // A new opening starts fresh; returning to an active recording continues it.
-    // Page navigation never hides the app, so it cannot reset these statistics.
-    if (!foreground && !record.recording && !record.saving) {
-      stats = emptyStats()
-      lastSecond = null
-    }
+    // Only creating a new session resets statistics. Sleep and page navigation
+    // do not end this app session, regardless of whether GPX is recording.
     foreground = true
   }
   const recorder = createRecorder(deps.file, next => {
