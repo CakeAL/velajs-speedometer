@@ -1,5 +1,5 @@
 <template>
-  <div class="page {{pageClass}}">
+  <div class="page {{pageClass}}" ontouchstart="onTouchStart" ontouchmove="onTouchMove" ontouchend="onTouchEnd">
     <div class="header {{narrow ? 'band-header' : ''}}"><text class="title {{narrow ? 'band-title' : ''}}">GPX 轨迹</text><text class="count">{{files.length}}</text></div>
     <list if="{{selectedUri}}" class="file-detail">
       <list-item type="filename" class="filename-row {{narrow ? 'band-filename-row' : ''}}"><text class="filename {{narrow ? 'band-filename' : ''}}">{{selectedName}}</text></list-item>
@@ -35,6 +35,7 @@ import { screenLayout } from '../../common/layout'
 import { listTracks, fileCall, assertTrackUri } from '../../common/files'
 import { recoverTracks } from '../../common/recording'
 import { summarizeTrack } from '../../common/track-summary'
+import { createNavigation } from '../../common/navigation'
 
 function detachPage(page) {
   if (page._visible) page._session.release(page._listener)
@@ -59,6 +60,7 @@ export default {
     this._visible = false
     this._version = 0
     this._session = this.$app.$def.session
+    this._navigation = createNavigation(router, 2, this.$app.$def.clock)
     this._listener = () => {}
     device.getInfo({ success: info => {
       if (this._destroyed) return
@@ -66,6 +68,7 @@ export default {
     }, fail() {} })
   },
   onShow() {
+    this._navigation.shown()
     this._visible = true; this._session.acquire(this._listener)
     const sync = this.$app.$def.trackSync
     if (sync && sync.subscribeStatus && !this._unsubscribeStatus) this._unsubscribeStatus = sync.subscribeStatus(status => {
@@ -129,9 +132,12 @@ export default {
   back() {
     if (this.busy) return
     if (this.selectedUri) { clearSelection(this, ''); return }
-    router.back()
+    this._navigation.go(0)
   },
-  onBackPress() { if (this.selectedUri) { this.back(); return true } return false }
+  onBackPress() { this.back(); return true },
+  onTouchStart(event) { this._navigation.start(event) },
+  onTouchMove(event) { this._navigation.move(event) },
+  onTouchEnd(event) { if (!this._destroyed && this._visible && !this.busy) this._navigation.end(event) }
 }
 </script>
 <style lang="less">

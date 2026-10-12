@@ -1,5 +1,5 @@
 <template>
-  <div class="page {{pageClass}}">
+  <div class="page {{pageClass}}" ontouchstart="onTouchStart" ontouchmove="onTouchMove" ontouchend="onTouchEnd">
     <div class="header {{narrow ? 'band-header' : ''}}">
       <div class="status-dot" style="background-color: {{statusColor}};"></div>
       <text class="status-text {{narrow ? 'band-status-text' : ''}}">{{statusText}}</text>

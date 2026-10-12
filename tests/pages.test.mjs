@@ -70,7 +70,7 @@ test('remote deletion removes the visible track and closes its selected detail',
   vm.onHide(); vm.onDestroy(); assert.equal(unsubscribed, 1)
 })
 
-test('reading pages navigate independently, keep their shared session and fit a round screen', async () => {
+test('reading pages replace routes, keep their shared session and fit a round screen', async () => {
   const routes = []; const listeners = new Set()
   const state = { speed: '36', altitude: '13', average: '20.0', maximum: '36.0', unit: 'km/h' }
   const session = {
@@ -81,18 +81,25 @@ test('reading pages navigate independently, keep their shared session and fit a 
   }
   const { createReadingPage } = await mockedModule('../src/common/page.js', {
     '@system.device': { getInfo(o) { o.success({ screenWidth: 466, screenHeight: 466, screenShape: 'circle' }) } },
-    '@system.router': { push(o) { routes.push(o.uri) }, back() { routes.push('back') } }
+    '@system.router': { replace(o) { routes.push(o.uri) } }
   })
-  const page = createReadingPage()
-  const vm = { ...page, ...page.private, $app: { $def: { session } } }
-  vm.onInit(); vm.onShow()
-  assert.equal(vm.speed, '36'); assert.ok(vm.speedFont > 0 && vm.speedFont < vm.speedHeight)
-  assert.equal(vm.speedHeight + vm.unitHeight + vm.metricsHeight + vm.summaryHeight, 152, 'home content fits normalized circle height')
-  vm.openPosition(); vm.openTracks(); vm.back()
-  assert.deepEqual(routes, ['/pages/position', '/pages/tracks', 'back'])
-  await vm.toggleRecording(); assert.equal(vm.recordText, '结束')
-  vm.changeUnit(); assert.equal(vm.unit, 'm/s')
-  vm.onHide(); vm.onDestroy(); assert.equal(listeners.size, 0)
+  function mount(index) {
+    const page = createReadingPage(index)
+    const vm = { ...page, ...page.private, $app: { $def: { session } } }
+    vm.onInit(); vm.onShow(); return vm
+  }
+  const home = mount(0)
+  assert.equal(home.speed, '36'); assert.ok(home.speedFont > 0 && home.speedFont < home.speedHeight)
+  assert.equal(home.speedHeight + home.unitHeight + home.metricsHeight + home.summaryHeight, 152)
+  home.openPosition(); home.onHide(); home.onDestroy()
+  const details = mount(1)
+  await details.toggleRecording(); assert.equal(details.recordText, '结束')
+  details.changeUnit(); assert.equal(details.unit, 'm/s')
+  assert.equal(details.average, '20.0')
+  assert.equal(details.onBackPress(), true)
+  details.onHide(); details.onDestroy()
+  assert.deepEqual(routes, ['/pages/position', '/pages/index'])
+  assert.equal(listeners.size, 0)
 })
 
 for (const format of ['full', 'filename', 'relative', 'double-slash']) {
@@ -107,7 +114,7 @@ test('track page reads and confirms deletion when file.list returns ' + format +
   const { default: page } = await mockedModule('../src/pages/tracks/tracks.ux', {
     '@system.file': fs.api,
     '@system.device': { getInfo(o) { o.success({ screenWidth: 432, screenHeight: 514, screenShape: 'rect' }) } },
-    '@system.router': { back() { backs++ } }
+    '@system.router': { replace(options) { assert.equal(options.uri, '/pages/index'); backs++ } }
   }, true)
   const vm = { ...page, ...page.private, $app: { $def: { session } } }
   vm.onInit(); vm.onShow()

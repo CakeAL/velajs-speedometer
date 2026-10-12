@@ -1,5 +1,5 @@
 <template>
-  <div class="page {{pageClass}}">
+  <div class="page {{pageClass}}" ontouchstart="onTouchStart" ontouchmove="onTouchMove" ontouchend="onTouchEnd">
     <div class="header {{narrow ? 'band-header' : ''}}"><text class="title {{narrow ? 'band-title' : ''}}">定位详情</text></div>
     <list class="readings">
       <list-item type="screen" class="screen-row {{narrow ? 'band-screen-row' : ''}}">
@@ -36,7 +36,7 @@
 </template>
 <script>
 import { createReadingPage } from '../../common/page'
-export default createReadingPage()
+export default createReadingPage(1)
 </script>
 <style lang="less">
 @import '../../common/page.less';
