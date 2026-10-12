@@ -9,6 +9,7 @@ const STATUS = {
 }
 
 const SCREEN_HOLD_MS = 10000
+const SCREEN_MODES = ['记录时常亮', '始终常亮', '10 秒自动熄屏']
 
 export function createSession(deps, clock) {
   const time = clock || { now: () => Date.now(), setInterval, clearInterval, setTimeout, clearTimeout }
@@ -17,6 +18,8 @@ export function createSession(deps, clock) {
   let unitIndex = 0
   let listeners = []
   let foreground = true
+  let screenMode = 0
+  let screenError = ''
   let trackingRequested = false
   let tickTimer = null
   let retryTimer = null
@@ -34,6 +37,7 @@ export function createSession(deps, clock) {
       statusText: STATUS[state.phase] || STATUS.error,
       statusColor: readings.tone === 'good' ? '#7ef7c5' : '#f2bf68',
       recording: record.recording, saving: record.saving,
+      screenModeText: SCREEN_MODES[screenMode], screenError,
       recordText: record.saving ? '保存中' : (record.recording ? '结束' : '记录'),
       recordDuration: duration, recordPoints: record.points,
       recordNotice: record.recording ? '' : record.message }
@@ -46,7 +50,14 @@ export function createSession(deps, clock) {
     })
   }
   function keepScreenOn(enabled) {
-    try { deps.brightness.setKeepScreenOn({ keepScreenOn: enabled, fail() {} }) } catch (error) { /* Optional on older firmware. */ }
+    function failed(data, code) {
+      if (disposed) return
+      screenError = '常亮设置失败' + (code === undefined ? '' : ' (' + code + ')')
+      emit()
+    }
+    try { deps.brightness.setKeepScreenOn({ keepScreenOn: enabled,
+      success() { if (!disposed && screenError) { screenError = ''; emit() } }, fail: failed }) }
+    catch (error) { failed() }
   }
   function releaseScreen() {
     if (screenTimer !== null) time.clearTimeout(screenTimer)
@@ -55,7 +66,10 @@ export function createSession(deps, clock) {
   }
   function holdScreenBriefly() {
     if (screenTimer !== null) time.clearTimeout(screenTimer)
+    screenTimer = null
+    if (!foreground || disposed) { keepScreenOn(false); return }
     keepScreenOn(true)
+    if (screenMode === 1 || (screenMode === 0 && (record.recording || record.saving))) return
     screenTimer = time.setTimeout(() => {
       screenTimer = null
       keepScreenOn(false)
@@ -67,7 +81,9 @@ export function createSession(deps, clock) {
     foreground = true
   }
   const recorder = createRecorder(deps.file, next => {
+    const changed = record.recording !== next.recording || record.saving !== next.saving
     record = next; emit()
+    if (changed && foreground && !disposed) holdScreenBriefly()
   })
   function wanted() {
     // GPS belongs to the app, not to a visible page or an active GPX recording.
@@ -139,6 +155,11 @@ export function createSession(deps, clock) {
       listeners = listeners.filter(item => item !== listener)
     },
     changeUnit() { unitIndex = (unitIndex + 1) % UNITS.length; emit() },
+    changeScreenMode() {
+      if (disposed) return
+      screenMode = (screenMode + 1) % SCREEN_MODES.length
+      holdScreenBriefly(); emit()
+    },
     refreshLocation() {
       if (!foreground || !wanted()) return
       if (tracker.isListening()) tracker.refresh()

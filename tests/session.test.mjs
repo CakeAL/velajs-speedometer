@@ -143,16 +143,16 @@ test('failed recording is released so the file page can recover its partial GPX'
   await h.session.dispose()
 })
 
-test('screen hold expires after ten seconds without stopping GPS, and recording/retry do not rearm it', async () => {
+test('unrecorded screen hold expires, while recording stays bright by default through retries', async () => {
   const h = harness(); h.session.acquire(() => {})
   assert.equal(h.screen.at(-1), true)
   h.clock.advance(9999); assert.equal(h.screen.at(-1), true)
   h.clock.advance(1); assert.equal(h.screen.at(-1), false)
   assert.equal(h.subscriptions.length, 1); assert.equal(h.unsubscribes, 0)
-  await h.session.toggleRecording(); assert.equal(h.screen.at(-1), false)
+  await h.session.toggleRecording(); assert.equal(h.screen.at(-1), true)
   h.subscriptions[0].fail('failed', 1000)
   h.clock.advance(5000); assert.equal(h.subscriptions.length, 2)
-  assert.equal(h.screen.at(-1), false)
+  assert.equal(h.screen.at(-1), true)
   await h.session.dispose(); assert.equal(h.clock.tasks, 0)
 })
 
@@ -169,7 +169,7 @@ test('returning from background preserves the recording and stream and starts a 
   assert.equal(h.subscriptions.length, 1); assert.equal(h.session.activeUri(), uri)
   assert.equal(h.session.snapshot().average, '54.0'); assert.equal(h.session.snapshot().maximum, '72.0')
   assert.equal(h.screen.at(-1), true)
-  h.clock.advance(10000); assert.equal(h.screen.at(-1), false)
+  h.clock.advance(10000); assert.equal(h.screen.at(-1), true)
   await h.session.toggleRecording(); assert.equal(h.session.snapshot().recording, false)
   await h.session.dispose()
 })
@@ -205,4 +205,49 @@ test('a synchronous manual snapshot timeout cannot later tear down the successfu
   assert.match(session.snapshot().gpsError, /单次定位错误 204/)
   assert.equal(fs.data.size, 0, 'diagnostics remain in memory only')
   await session.dispose(); assert.equal(unsubscribes, 1); assert.equal(clock.tasks, 0)
+})
+
+test('ten minutes of background GPX keep one subscription, bounded timers, updated altitude and session statistics', async () => {
+  const h = harness(); const listener = () => {}; h.session.acquire(listener)
+  // Explicitly choose automatic screen-off instead of the safe recording default.
+  h.session.changeScreenMode(); h.session.changeScreenMode()
+  assert.match(h.session.snapshot().screenModeText, /自动熄屏/)
+  h.subscriptions[0].callback(sample); await h.session.toggleRecording()
+  h.session.release(listener); h.session.suspend()
+  const timerCount = h.clock.tasks
+  for (let i = 0; i < 600; i++) {
+    h.subscriptions[0].callback({ ...sample, speed: i % 2 ? 20 : 10, altitude: 100 + i / 10 })
+    h.clock.advance(1000); await settle()
+    assert.equal(h.clock.tasks, timerCount, 'jobs must not accumulate during long recordings')
+  }
+  assert.equal(h.session.snapshot().recordPoints, 600)
+  assert.equal(h.session.snapshot().altitude, '159.9')
+  assert.equal(h.session.snapshot().average, '54.0'); assert.equal(h.session.snapshot().maximum, '72.0')
+  assert.equal(h.requests.length, 0, 'background uses only the active native subscription')
+  assert.equal(h.subscriptions.length, 1); assert.equal(h.unsubscribes, 0)
+  assert.equal(h.screen.at(-1), false)
+  h.session.resume(); h.session.acquire(listener)
+  assert.equal(h.session.snapshot().average, '54.0')
+  await h.session.toggleRecording()
+  const gpx = [...h.fs.data].find(([uri]) => uri.endsWith('.gpx'))[1]
+  assert.equal((gpx.match(/<trkpt /g) || []).length, 600)
+  assert.match(gpx, /<ele>159\.90<\/ele>/); assert.doesNotMatch(gpx, /[\r\n]/)
+  await h.session.dispose(); assert.equal(h.clock.tasks, 0)
+})
+
+test('screen mode supports always-on and explicit automatic screen-off even during recording', async () => {
+  const h = harness(); h.session.acquire(() => {})
+  h.session.changeScreenMode()
+  assert.equal(h.session.snapshot().screenModeText, '始终常亮')
+  h.clock.advance(60000); assert.equal(h.screen.at(-1), true)
+  h.session.changeScreenMode()
+  assert.match(h.session.snapshot().screenModeText, /自动熄屏/)
+  await h.session.toggleRecording()
+  h.clock.advance(10000); assert.equal(h.screen.at(-1), false)
+  h.session.suspend(); h.session.resume()
+  h.clock.advance(10000); assert.equal(h.screen.at(-1), false)
+  await h.session.toggleRecording(); await h.session.dispose()
+  const fresh = harness()
+  assert.equal(fresh.session.snapshot().screenModeText, '记录时常亮', 'preferences are not saved to storage')
+  await fresh.session.dispose()
 })

@@ -2,6 +2,10 @@
   <div class="page {{pageClass}}">
     <div class="header {{narrow ? 'band-header' : ''}}"><text class="title {{narrow ? 'band-title' : ''}}">定位详情</text></div>
     <list class="readings">
+      <list-item type="screen" class="screen-row {{narrow ? 'band-screen-row' : ''}}">
+        <div class="action secondary screen-button {{narrow ? 'band-screen-button' : ''}}" onclick="changeScreenMode"><text class="action-text {{narrow ? 'band-action-text' : ''}}">{{screenModeText}}</text></div>
+      </list-item>
+      <list-item if="{{screenError}}" type="screen-error" class="notice-row {{narrow ? 'band-notice-row' : ''}}"><text class="hint {{narrow ? 'band-hint' : ''}}">{{screenError}}</text></list-item>
       <list-item type="coordinate" class="coordinate-card {{narrow ? 'band-coordinate-card' : ''}}">
         <text class="reading-label {{narrow ? 'band-reading-label' : ''}}">{{latitudeDirection}}</text>
         <text class="coordinate-value {{narrow ? 'band-coordinate-value' : ''}}">{{latitudeNumber}}{{latitudeNumber === '--' ? '' : '°'}}</text>
