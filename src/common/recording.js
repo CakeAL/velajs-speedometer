@@ -7,6 +7,17 @@ export const GPX_HEADER = '<?xml version="1.0" encoding="UTF-8"?>' +
 
 export function isoTime(now) { return new Date(now).toISOString() }
 
+const EVENTS = ['show', 'hide', 'tick', 'retry', 'gpsfail', 'error', 'stop', 'dispose', 'recovered']
+export function runtimeEvent(kind, now, info = {}) {
+  if (EVENTS.indexOf(kind) < 0) return ''
+  const gps = typeof info.gps === 'number' && isFinite(info.gps) ? Math.max(0, Math.min(999999999, Math.floor(info.gps))) : 0
+  const phase = String(info.phase || 'unknown').replace(/[^a-z]/g, '').slice(0, 16) || 'unknown'
+  const code = typeof info.code === 'number' && isFinite(info.code) && Math.abs(info.code) < 1000000000 ? Math.floor(info.code) : 'none'
+  // ASCII XML comments are valid at any GPX position and ignored by importers.
+  // Only fixed lifecycle fields are stored; no stack traces or error text.
+  return '<!--speedometer:event=' + kind + ';time=' + isoTime(now) + ';gps=' + gps + ';phase=' + phase + ';code=' + code + '-->'
+}
+
 export function trackPoint(fix, now) {
   if (!fix || typeof fix.latitude !== 'number' || !isFinite(fix.latitude) || Math.abs(fix.latitude) > 90 ||
       typeof fix.longitude !== 'number' || !isFinite(fix.longitude) || Math.abs(fix.longitude) > 180) return null
@@ -23,9 +34,17 @@ export function createRecorder(api, onChange) {
   let busy = false
   let broken = false
   let lastSecond = null
+  let events = []
   function emit() { onChange({ ...state }) }
   return {
     snapshot() { return { ...state } },
+    noteEvent(kind, now, info) {
+      if (!state.recording || broken) return
+      const event = runtimeEvent(kind, now, info)
+      if (!event) return
+      if (events.length === 8) events.shift()
+      events.push(event)
+    },
     async start(now) {
       if (state.recording || state.saving) return
       state = { ...state, saving: true, message: '正在创建轨迹' }; emit()
@@ -36,7 +55,7 @@ export function createRecorder(api, onChange) {
         await fileCall(api, 'writeText', { uri, text: GPX_HEADER + '<metadata><time>' + isoTime(now) +
           '</time></metadata><trk><name>' + name + '</name><trkseg>' })
         state = { recording: true, saving: false, points: 0, startedAt: now, uri, message: '等待有效定位' }
-        broken = false; busy = false; lastSecond = null; write = Promise.resolve(); emit()
+        broken = false; busy = false; lastSecond = null; events = []; write = Promise.resolve(); emit()
       } catch (error) { state = { ...state, saving: false, message: error.message }; emit(); throw error }
     },
     sample(fix, now, fresh) {
@@ -45,13 +64,15 @@ export function createRecorder(api, onChange) {
       if (second === lastSecond) return
       lastSecond = second
       const point = fresh ? trackPoint(fix, now) : null
-      if (!point) { state.message = '等待定位，缺失时不补造轨迹'; emit(); return }
+      if (!point && events.length === 0) { state.message = '等待定位，缺失时不补造轨迹'; emit(); return }
       if (busy) { state.message = '存储忙，已跳过这一秒'; emit(); return }
       busy = true
       const uri = state.uri
-      write = fileCall(api, 'writeText', { uri, text: point, append: true }).then(() => {
-        state.points += 1
-        state.message = fix.altitude === null ? '记录中 · 设备未返回海拔' : '每秒记录 · 含海拔'
+      const text = events.splice(0).join('') + (point || '')
+      write = fileCall(api, 'writeText', { uri, text, append: true }).then(() => {
+        if (point) state.points += 1
+        state.message = !point ? '等待定位，缺失时不补造轨迹' :
+          (fix.altitude === null ? '记录中 · 设备未返回海拔' : '每秒记录 · 含海拔')
       }, error => {
         broken = true; state.recording = false
         state.message = '写入失败 · 请到轨迹页恢复'
@@ -63,7 +84,7 @@ export function createRecorder(api, onChange) {
       try {
         await write
         if (broken) throw new Error('请到轨迹页恢复未完成文件')
-        await fileCall(api, 'writeText', { uri: state.uri, text: GPX_END, append: true })
+        await fileCall(api, 'writeText', { uri: state.uri, text: events.splice(0).join('') + GPX_END, append: true })
         const uri = state.uri.replace(/\.part$/, '.gpx')
         await fileCall(api, 'move', { srcUri: state.uri, dstUri: uri })
         state = { ...state, uri: null, saving: false, message: '已保存 ' + state.points + ' 个轨迹点' }; emit()
@@ -104,7 +125,10 @@ export async function recoverTracks(api, activeUri) {
         if (bytes.length < READ_CHUNK_BYTES) break
       }
       if (!initialized) throw new Error('文件为空')
-      await fileCall(api, 'writeText', { uri: repair, text: GPX_END, append: true })
+      // Preserve complete runtime comments after the last complete track point,
+      // while still discarding a partially written point or comment.
+      const notes = carry.match(/<!--speedometer:event=[a-z]+;time=[^;<>]+;gps=\d+;phase=[a-z]+;code=(?:none|-?\d+)-->/g) || []
+      await fileCall(api, 'writeText', { uri: repair, text: notes.join('') + runtimeEvent('recovered', Date.now()) + GPX_END, append: true })
       await fileCall(api, 'move', { srcUri: repair, dstUri: item.uri.replace(/\.part$/, '.gpx') })
       await fileCall(api, 'delete', { uri: item.uri })
       recovered += 1

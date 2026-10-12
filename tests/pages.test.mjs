@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { load, fakeFiles } from './helpers.mjs'
+import { load, fakeFiles, settle } from './helpers.mjs'
 const { createRecorder } = await load('../src/common/recording.js')
 let counter = 0
 async function mockedModule(path, apis, ux = false) {
@@ -47,6 +47,33 @@ test('app starts GPS on first foreground entry and keeps it through app hide unt
     assert.equal(fs.data.size, 0)
   } finally { app.onDestroy() }
   assert.deepEqual(calls, ['subscribe', 'unsubscribe'])
+})
+
+test('app error callback is retained in the active GPX and shown by the file page', async () => {
+  const fs = fakeFiles()
+  const { default: definition } = await mockedModule('../src/app.ux', {
+    '@system.file': fs.api,
+    '@system.geolocation': { subscribe() {}, unsubscribe() {} },
+    '@system.brightness': { setKeepScreenOn() {} },
+    '@system.interconnect': { instance() { return { connect() {}, close() {} } } }
+  }, true)
+  const app = { ...definition }
+  try {
+    app.onCreate(); app.onShow(); await app.session.toggleRecording()
+    app.onError(); await app.session.toggleRecording()
+    const uri = [...fs.data.keys()].find(name => name.endsWith('.gpx'))
+    const { default: page } = await mockedModule('../src/pages/tracks/tracks.ux', {
+      '@system.file': fs.api,
+      '@system.device': { getInfo(o) { o.success({ screenWidth: 432, screenHeight: 514 }) } },
+      '@system.router': {}
+    }, true)
+    const vm = { ...page, ...page.private, $app: { $def: app } }
+    vm.onInit(); vm.onShow(); await settle(); await settle()
+    await vm.selectFile(uri)
+    assert.match(vm.runtimeTrace, /收到应用错误回调/)
+    assert.match(vm.runtimeTrace, /手动结束记录/)
+    vm.onHide(); vm.onDestroy()
+  } finally { app.onDestroy() }
 })
 
 test('remote deletion removes the visible track and closes its selected detail', async () => {

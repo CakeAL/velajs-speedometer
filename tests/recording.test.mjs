@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { load, fakeFiles, settle } from './helpers.mjs'
-const { createRecorder, trackPoint, recoverTracks, GPX_END } = await load('../src/common/recording.js')
+const { createRecorder, trackPoint, recoverTracks, runtimeEvent, GPX_END } = await load('../src/common/recording.js')
 const { listTracks, assertTrackUri, TRACK_DIR } = await load('../src/common/files.js')
 const { summarizeTrack } = await load('../src/common/track-summary.js')
 const fix = { latitude: 0, longitude: 121.4, altitude: -12.5, speed: 36 }
@@ -96,4 +96,62 @@ test('file operations reject paths outside this app track directory', () => {
     assert.throws(() => assertTrackUri(uri))
   }
   assert.doesNotThrow(() => assertTrackUri(TRACK_DIR + 'track-a.gpx'))
+})
+
+test('runtime notes are compact safe XML, bounded in memory and never fabricate track points', async () => {
+  const fs = fakeFiles(); const recorder = createRecorder(fs.api, () => {})
+  recorder.noteEvent('hide', 90000)
+  assert.equal(fs.writes.length, 0, 'no recording means no diagnostic file writes')
+  await recorder.start(100000)
+  assert.equal(runtimeEvent('unknown', 100000), '')
+  const safe = runtimeEvent('gpsfail', 100000, { phase: 'bad-->\n<ele>', gps: Infinity, code: NaN })
+  assert.doesNotMatch(safe, /[\r\n]/); assert.match(safe, /gps=0;phase=badele;code=none-->/)
+  for (let i = 0; i < 30; i++) recorder.noteEvent('tick', 101000 + i * 1000, { gps: i })
+  recorder.sample(null, 132000, false); await settle()
+  recorder.noteEvent('stop', 133000)
+  const uri = await recorder.finish(); const text = fs.data.get(uri)
+  assert.equal((text.match(/speedometer:event=tick/g) || []).length, 8)
+  assert.equal((text.match(/<trkpt /g) || []).length, 0)
+  assert.equal(recorder.snapshot().points, 0)
+  assert.doesNotMatch(text, /[\r\n]/); assert.ok(text.endsWith(GPX_END))
+  assert.match((await summarizeTrack(fs.api, uri)).runtimeTrace, /手动结束记录/)
+})
+
+test('runtime summary handles comments split across read boundaries without affecting point timing', async () => {
+  const fs = fakeFiles(); const recorder = createRecorder(fs.api, () => {})
+  await recorder.start(100000)
+  const uri = recorder.snapshot().uri.replace(/\.part$/, '.gpx')
+  const header = fs.data.get(recorder.snapshot().uri)
+  const prefix = header + trackPoint(fix, 101000)
+  // A valid padding comment puts the lifecycle comment across the 4096-byte boundary.
+  const padding = '<!--' + 'x'.repeat(4096 - 35 - prefix.length - 7) + '-->'
+  fs.data.set(uri, prefix + padding + runtimeEvent('hide', 102000) +
+    runtimeEvent('tick', 282000, { gps: 180, phase: 'live' }) +
+    runtimeEvent('gpsfail', 282001, { code: 1000, phase: 'error' }) +
+    runtimeEvent('error', 282002) + runtimeEvent('dispose', 282003) + GPX_END)
+  const result = await summarizeTrack(fs.api, uri)
+  assert.equal(result.points, 1); assert.equal(result.duration, '0 分 1 秒')
+  assert.equal(result.complete, true)
+  assert.match(result.runtimeTrace, /转入后台 .*最后后台运行 \+180 秒 · GPS 180 次 · 已定位/s)
+  assert.match(result.runtimeTrace, /定位报错 .*\(1000\)/)
+  assert.match(result.runtimeTrace, /收到应用错误回调/)
+  assert.match(result.runtimeTrace, /收到应用销毁回调/)
+  assert.equal((await summarizeTrack(fs.api, await recorder.finish())).runtimeTrace, '', 'legacy files remain readable')
+})
+
+test('recovery retains complete trailing runtime notes and discards truncated points and comments', async () => {
+  const fs = fakeFiles(); const recorder = createRecorder(fs.api, () => {})
+  await recorder.start(100000)
+  const uri = recorder.snapshot().uri
+  fs.data.set(uri, fs.data.get(uri) + trackPoint(fix, 101000) +
+    runtimeEvent('hide', 102000) + runtimeEvent('tick', 282000, { gps: 180, phase: 'live' }) +
+    '<trkpt lat="3"><!--speedometer:event=error;time=')
+  assert.deepEqual(await recoverTracks(fs.api, null), { recovered: 1, failed: 0 })
+  const repaired = uri.replace(/\.part$/, '.gpx'); const text = fs.data.get(repaired)
+  assert.doesNotMatch(text, /<trkpt lat="3"|speedometer:event=error|[\r\n]/)
+  assert.ok(text.endsWith(GPX_END))
+  const summary = await summarizeTrack(fs.api, repaired)
+  assert.equal(summary.points, 1)
+  assert.match(summary.runtimeTrace, /最后后台运行 \+180 秒/)
+  assert.match(summary.runtimeTrace, /中断后恢复 · 原因待查/)
 })
