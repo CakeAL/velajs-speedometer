@@ -92,7 +92,7 @@ export function createSession(deps, clock) {
       if (next.fix.speed !== null) stats.max = Math.max(stats.max, next.fix.speed)
     } else if (['error', 'timeout', 'denied', 'unsupported'].indexOf(next.phase) >= 0) scheduleRetry()
     emit()
-  }, time, { initialSnapshot: false })
+  }, time, { initialSnapshot: false, refreshInterval: 15000 })
   function tick() {
     const now = time.now()
     const second = Math.floor(now / 1000)
@@ -139,6 +139,11 @@ export function createSession(deps, clock) {
       listeners = listeners.filter(item => item !== listener)
     },
     changeUnit() { unitIndex = (unitIndex + 1) % UNITS.length; emit() },
+    refreshLocation() {
+      if (!foreground || !wanted()) return
+      if (tracker.isListening()) tracker.refresh()
+      else { clearRetry(); tracker.retry() }
+    },
     async toggleRecording() {
       if (record.saving) return
       if (record.recording) return recorder.finish()
@@ -152,6 +157,7 @@ export function createSession(deps, clock) {
       if (disposed) return
       const visibleAgain = !foreground
       enterForeground()
+      tracker.setForeground(true)
       if (listeners.length > 0) {
         if (visibleAgain) holdScreenBriefly()
         start(); emit()
@@ -159,6 +165,7 @@ export function createSession(deps, clock) {
     },
     suspend() {
       foreground = false
+      tracker.setForeground(false)
       releaseScreen()
       // Keep the declared background geolocation feature running even when not
       // recording. Only the display sleeps; fresh fixes stay available on wake.

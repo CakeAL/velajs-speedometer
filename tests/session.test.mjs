@@ -191,18 +191,18 @@ test('finishing or failing a background recording keeps GPS live until app destr
   }
 })
 
-test('continuous sessions do not start a one-shot request before the background subscription', async () => {
-  const clock = fakeClock(); const fs = fakeFiles(); let streams = 0; let unsubscribes = 0; let requests = 0
+test('a synchronous manual snapshot timeout cannot later tear down the successfully attached GPS stream', async () => {
+  const clock = fakeClock(); const fs = fakeFiles(); let streams = 0; let unsubscribes = 0
   const session = createSession({
     file: fs.api, brightness: { setKeepScreenOn() {} },
     geolocation: {
-      getLocation(options) { requests++; options.fail('timeout', 204) },
+      getLocation(options) { options.fail('timeout', 204) },
       subscribe() { streams++ }, unsubscribe() { unsubscribes++ }
     }
   }, clock)
-  session.activate(); clock.advance(180000)
+  session.activate(); session.refreshLocation(); clock.advance(180000)
   assert.equal(streams, 1); assert.equal(unsubscribes, 0)
-  assert.equal(requests, 0)
+  assert.match(session.snapshot().gpsError, /单次定位错误 204/)
   assert.equal(fs.data.size, 0, 'diagnostics remain in memory only')
   await session.dispose(); assert.equal(unsubscribes, 1); assert.equal(clock.tasks, 0)
 })

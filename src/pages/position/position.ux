@@ -18,7 +18,11 @@
       <list-item type="diagnostics" class="diagnostics {{narrow ? 'band-diagnostics' : ''}}">
         <text class="diagnostic-text {{narrow ? 'band-diagnostic-text' : ''}}">{{gpsRequest}}</text>
         <text class="diagnostic-text {{narrow ? 'band-diagnostic-text' : ''}}">{{gpsCallbacks}}</text>
+        <text class="diagnostic-text {{narrow ? 'band-diagnostic-text' : ''}}">{{gpsAltitude}}</text>
         <text if="{{gpsError}}" class="diagnostic-text {{narrow ? 'band-diagnostic-text' : ''}}">{{gpsError}}</text>
+      </list-item>
+      <list-item type="refresh" class="screen-row {{narrow ? 'band-screen-row' : ''}}">
+        <div class="action secondary screen-button {{narrow ? 'band-screen-button' : ''}}" onclick="refreshLocation"><text class="action-text {{narrow ? 'band-action-text' : ''}}">刷新定位</text></div>
       </list-item>
     </list>
     <div class="footer position-footer {{narrow ? 'band-footer' : ''}} {{narrow ? 'band-position-footer' : ''}}">
@@ -35,7 +39,9 @@ export default createReadingPage()
 .title { color: #edf4fa; font-size: 16px; font-weight: bold; }
 .readings { flex: 1; width: 100%; }
 .notice-row { width: 100%; height: 14px; align-items: center; }
-.diagnostics { width: 100%; height: 72px; flex-direction: column; justify-content: center; }
+.diagnostics { width: 100%; height: 96px; flex-direction: column; justify-content: center; }
+.screen-row { width: 100%; height: 36px; justify-content: center; align-items: center; }
+.screen-button { width: 140px; height: 28px; }
 .diagnostic-text { width: 100%; font-size: 10px; color: #96aeb8; lines: 2; }
 .coordinate-card { width: 100%; height: 48px; flex-direction: column; justify-content: center; }
 .reading-label { font-size: 12px; color: #96aeb8; }
@@ -55,6 +61,8 @@ export default createReadingPage()
 .band-reading-value { font-size: 32px; }
 .band-position-footer { height: 48px; }
 .band-notice-row { height: 36px; }
-.band-diagnostics { height: 132px; }
+.band-diagnostics { height: 176px; }
+.band-screen-row { height: 58px; }
+.band-screen-button { width: 180px; height: 44px; }
 .band-diagnostic-text { font-size: 16px; }
 </style>

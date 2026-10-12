@@ -73,7 +73,7 @@ export function locationView(state, unitIndex, now) {
   return {
     speed,
     unit: unit.label,
-    altitude: fix && fix.altitude !== null ? fix.altitude.toFixed(0) : '--',
+    altitude: fix && fix.altitude !== null ? fix.altitude.toFixed(1) : '--',
     latitudeNumber: latitude.number, latitudeDirection: latitude.direction,
     longitudeNumber: longitude.number, longitudeDirection: longitude.direction,
     accuracy: fix && fix.accuracy !== null ? '±' + Math.round(fix.accuracy) + ' m' : '--',
@@ -81,29 +81,43 @@ export function locationView(state, unitIndex, now) {
     gpsRequest: diagnostics ? '单次定位：' + diagnostics.snapshot : '单次定位：未启动',
     gpsCallbacks: diagnostics ? '订阅回调 ' + diagnostics.stream + ' 次 · 无效 ' + diagnostics.invalid + ' 次' : '订阅尚未启动',
     gpsError: diagnostics && diagnostics.error ? diagnostics.error : '',
+    gpsAltitude: diagnostics ? '海拔回传 ' + diagnostics.altitudeSamples + ' 次 · 变化 ' + diagnostics.altitudeChanges + ' 次' : '尚未收到海拔',
     tone: fresh && !speedStale ? (fix.accuracy !== null && fix.accuracy > 50 ? 'warning' : 'good') :
       (state.phase === 'paused' ? 'muted' : 'warning')
   }
 }
 
-// Use the reference app's one initial snapshot plus continuous subscription.
-// The tick updates freshness only; it never replaces the subscription with polling.
+// Keep the stream active in background. Supplemental foreground snapshots can
+// refresh fields that some firmware only updates in getLocation(), such as height.
 export function createLocationTracker(api, onChange, clock, options = {}) {
   const time = clock || { now: () => Date.now(), setInterval, clearInterval }
   let state = { phase: 'idle', fix: null, updatedAt: null }
   let active = false
+  let foreground = true
   let generation = 0
+  let streamGeneration = 0
   let timer = null
   let subscribed = false
   let revision = 0
   let startedAt = 0
-  let diagnostics = { snapshot: '未启动', stream: 0, invalid: 0, error: '' }
+  let requestId = 0
+  let pendingSnapshot = false
+  let snapshotDeadline = 0
+  let lastSnapshotAt = 0
+  let lastAltitude = null
+  let diagnostics = { snapshot: '未启动', stream: 0, invalid: 0, error: '', altitudeSamples: 0, altitudeChanges: 0 }
 
   function emit() { onChange({ ...state, diagnostics: { ...diagnostics } }) }
-
+  function observeAltitude(value) {
+    if (value === null) return
+    diagnostics.altitudeSamples += 1
+    if (lastAltitude !== null && value !== lastAltitude) diagnostics.altitudeChanges += 1
+    lastAltitude = value
+  }
   function cleanup() {
     active = false
     generation += 1
+    pendingSnapshot = false
     if (timer !== null) time.clearInterval(timer)
     timer = null
     if (subscribed) {
@@ -111,7 +125,6 @@ export function createLocationTracker(api, onChange, clock, options = {}) {
       try { api.unsubscribe() } catch (error) { /* Firmware may already have stopped. */ }
     }
   }
-
   function fail(code, terminal, data) {
     code = Number(code)
     diagnostics.error = (terminal ? '订阅' : '单次定位') + '错误 ' + (isFinite(code) ? code : '未知') +
@@ -123,91 +136,125 @@ export function createLocationTracker(api, onChange, clock, options = {}) {
     if (code === 203) phase = 'unsupported'
     if (code === 204) phase = terminal ? 'error' : 'timeout'
     if ([201, 207, 400, 402].indexOf(code) >= 0) phase = 'denied'
-    if (!terminal && phase !== 'timeout' && phase !== 'denied') {
-      phase = 'locating'
-    }
+    if (!terminal && phase !== 'timeout' && phase !== 'denied') phase = 'locating'
     state = { ...state, phase }
     emit()
   }
-
   function accept(data) {
     const fix = normalizeLocation(data)
     // Invalid callbacks must not extend the lifetime of an old speed reading.
     if (!fix) { diagnostics.invalid += 1; emit(); return }
+    observeAltitude(fix.altitude)
     revision += 1
     state = { phase: 'live', fix, updatedAt: time.now() }
     emit()
   }
-
+  function attachStream() {
+    if (!active) return
+    if (typeof api.subscribe !== 'function') { fail(203, true); return }
+    const token = generation
+    const stream = ++streamGeneration
+    const current = () => active && token === generation && stream === streamGeneration
+    subscribed = true
+    try {
+      api.subscribe({
+        callback(data) {
+          if (!current() || !subscribed) return
+          diagnostics.stream += 1
+          accept(data)
+        },
+        fail(data, code) { if (current()) fail(code, true, data) }
+      })
+    } catch (error) { if (current()) fail(-1, true, error.message) }
+  }
+  function finishSnapshot() {
+    pendingSnapshot = false
+    // A one-shot request may complete after screen-off. Reassert the app-owned
+    // stream after that completion, without unsubscribe() or stopping the GNSS.
+    if (active && !foreground && subscribed) attachStream()
+  }
+  function requestSnapshot(timeout = 10000) {
+    if (!active || !foreground || pendingSnapshot) return
+    const token = generation
+    const id = ++requestId
+    const atRevision = revision
+    const altitudeAtRequest = state.fix && state.fix.altitude
+    const current = () => active && token === generation && id === requestId && pendingSnapshot
+    pendingSnapshot = true
+    lastSnapshotAt = time.now()
+    snapshotDeadline = lastSnapshotAt + timeout
+    diagnostics.snapshot = '等待返回'
+    emit()
+    try {
+      api.getLocation({
+        timeout,
+        success(data) {
+          if (!current()) return
+          diagnostics.snapshot = '已返回'
+          if (revision === atRevision) accept(data)
+          else {
+            const fix = normalizeLocation(data)
+            // Never overwrite newer speed/coordinates or revive stale samples.
+            // A supplement can update height if the stream hasn't changed it.
+            if (fix && fix.altitude !== null && state.fix && state.fix.altitude === altitudeAtRequest &&
+                time.now() - state.updatedAt < SPEED_STALE_AFTER) {
+              observeAltitude(fix.altitude)
+              state = { ...state, fix: { ...state.fix, altitude: fix.altitude } }
+            }
+            emit()
+          }
+          finishSnapshot()
+        },
+        fail(data, code) {
+          if (!current()) return
+          fail(code, false, data)
+          finishSnapshot()
+        }
+      })
+    } catch (error) {
+      if (current()) { fail(typeof api.getLocation === 'function' ? -1 : 203, false, error.message); finishSnapshot() }
+    }
+  }
   function tick() {
     if (!active) return
-    const age = state.updatedAt === null ? null : time.now() - state.updatedAt
+    const now = time.now()
+    if (pendingSnapshot && now >= snapshotDeadline) {
+      requestId += 1
+      fail(204, false, '未收到结束回调')
+      finishSnapshot()
+    }
+    const age = state.updatedAt === null ? null : now - state.updatedAt
     if (age !== null && age >= SPEED_STALE_AFTER && state.phase === 'live') {
-      state = { ...state, phase: 'stale' }
-    } else if (state.phase === 'locating' && time.now() - startedAt >= INITIAL_TIMEOUT) {
-      state = { ...state, phase: 'timeout' }
-    } else return
-    // Session's clock refreshes the visible values; notify only on state changes.
-    emit()
+      state = { ...state, phase: 'stale' }; emit()
+    } else if (state.phase === 'locating' && now - startedAt >= INITIAL_TIMEOUT) {
+      state = { ...state, phase: 'timeout' }; emit()
+    }
+    if (options.refreshInterval && foreground && subscribed && state.fix &&
+        now - lastSnapshotAt >= options.refreshInterval) requestSnapshot()
   }
-
+  function start() {
+    if (active) return
+    active = true
+    generation += 1
+    revision = 0
+    startedAt = time.now()
+    lastSnapshotAt = startedAt
+    diagnostics.snapshot = options.initialSnapshot === false ? '等待前台补充刷新' : '未启动'
+    diagnostics.error = ''
+    state = { phase: 'locating', fix: null, updatedAt: null }
+    emit()
+    timer = time.setInterval(tick, 1000)
+    // Production sessions start with subscribe only; no one-shot request can
+    // complete later and interfere with the initial background feature binding.
+    if (options.initialSnapshot !== false) requestSnapshot(INITIAL_TIMEOUT)
+    attachStream()
+  }
   return {
     isListening() { return active && subscribed },
-    start() {
-      if (active) return
-      active = true
-      generation += 1
-      revision = 0
-      startedAt = time.now()
-      diagnostics.snapshot = options.initialSnapshot === false ? '等待补充请求' : '等待返回'
-      diagnostics.error = ''
-      const token = generation
-      const current = () => active && token === generation
-      state = { phase: 'locating', fix: null, updatedAt: null }
-      emit()
-      timer = time.setInterval(tick, 1000)
-      // Request the first fix and attach the stream immediately. This ordering
-      // is a compatibility trial, not a documented guarantee of faster GPS.
-      if (options.initialSnapshot !== false) {
-        try {
-          api.getLocation({
-            timeout: INITIAL_TIMEOUT,
-            success(data) {
-              if (!current()) return
-              diagnostics.snapshot = '已返回'
-              if (revision === 0) accept(data)
-              else emit()
-            },
-            fail(data, code) { if (current()) fail(code, false, data) }
-          })
-        } catch (error) {
-          if (current()) fail(typeof api.getLocation === 'function' ? -1 : 203, false, error.message)
-        }
-      }
-      if (!current()) return
-      if (typeof api.subscribe !== 'function') { fail(203, true); return }
-      subscribed = true
-      try {
-        api.subscribe({
-          callback(data) {
-            if (!current() || !subscribed) return
-            diagnostics.stream += 1
-            accept(data)
-          },
-          fail(data, code) { if (current()) fail(code, true, data) }
-        })
-      } catch (error) {
-        if (current()) fail(-1, true, error.message)
-      }
-    },
-    stop() {
-      cleanup()
-      state = { ...state, phase: 'paused' }
-      emit()
-    },
-    retry() {
-      cleanup()
-      this.start()
-    }
+    start,
+    refresh: requestSnapshot,
+    setForeground(value) { foreground = value },
+    stop() { cleanup(); state = { ...state, phase: 'paused' }; emit() },
+    retry() { cleanup(); start() }
   }
 }

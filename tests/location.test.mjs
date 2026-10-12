@@ -7,7 +7,7 @@ const { normalizeSpeed, normalizeLocation, locationView, createLocationTracker, 
 const { screenLayout, dashboardLayout } = await load('../src/common/layout.js')
 const sample = { latitude: 31.230416, longitude: 121.473701, speed: 10, altitude: 12.6, accuracy: 8 }
 
-function harness() {
+function harness(options) {
   let now = 100000
   let interval = null
   let unsubscribes = 0
@@ -25,7 +25,7 @@ function harness() {
     setInterval(callback) { interval = callback; return 1 },
     clearInterval() { interval = null }
   }
-  const tracker = createLocationTracker(api, state => changes.push(state), clock)
+  const tracker = createLocationTracker(api, state => changes.push(state), clock, options)
   return {
     api, tracker, requests, subscriptions, calls,
     advance(ms) { now += ms; if (interval) interval() },
@@ -81,7 +81,7 @@ test('zero coordinates and below-sea-level altitude are valid', () => {
   const fix = normalizeLocation({ latitude: 0, longitude: 0, speed: 0, altitude: -10 })
   const view = locationView({ phase: 'live', fix, updatedAt: 0 }, 0, 0)
   assert.equal(view.speed, '0')
-  assert.equal(view.altitude, '-10')
+  assert.equal(view.altitude, '-10.0')
   assert.equal(view.latitudeNumber, '0.000000')
   assert.equal(view.latitudeDirection, '北纬 N')
   assert.equal(view.longitudeDirection, '东经 E')
@@ -288,7 +288,7 @@ test('dashboard fits watch screens and keeps narrow scrolling rows and long spee
 })
 
 test('watch-visible diagnostics distinguish a silent stream, rejected data and native errors', () => {
-  const h = harness(); h.tracker.start(); h.advance(60000)
+  const h = harness(); h.tracker.start(); h.advance(59000)
   assert.match(h.view().gpsRequest, /等待返回/)
   assert.match(h.view().gpsCallbacks, /订阅回调 0 次/)
   h.requests[0].fail('request timeout', 204)
@@ -314,4 +314,50 @@ test('a synchronous single fix is retained while the subscription is attached af
   assert.equal(h.tracker.isListening(), true)
   h.subscriptions[0].callback({ ...sample, speed: 5 })
   assert.equal(h.view().speed, '18')
+})
+
+test('foreground supplemental snapshots refresh altitude without replacing newer stream speed or coordinates', () => {
+  const h = harness({ initialSnapshot: false, refreshInterval: 15000 }); h.tracker.start()
+  assert.equal(h.requests.length, 0)
+  h.subscriptions[0].callback(sample); h.advance(15000)
+  assert.equal(h.requests.length, 1)
+  h.subscriptions[0].callback({ ...sample, speed: 20, latitude: 32 })
+  const timestamp = h.state.updatedAt
+  h.requests[0].success({ ...sample, speed: 1, altitude: 20.25 })
+  assert.equal(h.view().speed, '72'); assert.equal(h.state.fix.latitude, 32)
+  assert.equal(h.view().altitude, '20.3'); assert.equal(h.state.updatedAt, timestamp)
+  h.advance(15000)
+  h.subscriptions[0].callback({ ...sample, altitude: 40 })
+  h.requests[1].success({ ...sample, altitude: 25 })
+  assert.equal(h.view().altitude, '40.0', 'a late supplement cannot undo a newer height change')
+  assert.match(h.view().gpsAltitude, /变化/)
+})
+
+test('a snapshot completing after screen-off reasserts the background stream and rejects the old handler', () => {
+  const h = harness({ initialSnapshot: false, refreshInterval: 15000 }); h.tracker.start()
+  h.subscriptions[0].callback(sample); h.advance(15000)
+  const old = h.subscriptions[0]
+  h.tracker.setForeground(false)
+  h.requests[0].success({ ...sample, altitude: 30 })
+  assert.equal(h.subscriptions.length, 2); assert.equal(h.unsubscribes, 0)
+  old.callback({ ...sample, speed: 99 })
+  assert.equal(h.view().speed, '36')
+  h.subscriptions[1].callback({ ...sample, speed: 5, altitude: 31 })
+  assert.equal(h.view().speed, '18'); assert.equal(h.view().altitude, '31.0')
+  h.advance(300000)
+  assert.equal(h.requests.length, 1, 'screen-off must not initiate more single requests')
+  h.tracker.stop(); assert.equal(h.unsubscribes, 1)
+})
+
+test('supplemental requests are bounded, time out if firmware forgets callbacks and never revive stale fixes', () => {
+  const h = harness({ initialSnapshot: false, refreshInterval: 15000 }); h.tracker.start()
+  h.subscriptions[0].callback(sample); h.advance(15000)
+  h.tracker.refresh(); assert.equal(h.requests.length, 1)
+  h.advance(10000)
+  assert.match(h.view().gpsRequest, /超时/)
+  h.requests[0].success({ ...sample, speed: 99 })
+  assert.equal(h.view().speed, '0')
+  h.tracker.refresh(); assert.equal(h.requests.length, 2)
+  h.tracker.stop(); h.requests[1].success(sample)
+  assert.equal(h.state.phase, 'paused')
 })
