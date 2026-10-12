@@ -162,13 +162,15 @@ test('failed recording is released so the file page can recover its partial GPX'
   await h.session.dispose()
 })
 
-test('unrecorded screen hold expires, while recording stays bright by default through retries', async () => {
+test('unrecorded idle shows a black cover, while recording keeps the full UI bright by default', async () => {
   const h = harness(); h.session.acquire(() => {})
   assert.equal(h.screen.at(-1), true)
   h.clock.advance(9999); assert.equal(h.screen.at(-1), true)
-  h.clock.advance(1); assert.equal(h.screen.at(-1), false)
+  h.clock.advance(1); assert.equal(h.screen.at(-1), true)
+  assert.equal(h.session.snapshot().screenCovered, true)
   assert.equal(h.subscriptions.length, 1); assert.equal(h.unsubscribes, 0)
   await h.session.toggleRecording(); assert.equal(h.screen.at(-1), true)
+  assert.equal(h.session.snapshot().screenCovered, false)
   h.subscriptions[0].fail('failed', 1000)
   h.clock.advance(5000); assert.equal(h.subscriptions.length, 2)
   assert.equal(h.screen.at(-1), true)
@@ -258,21 +260,72 @@ test('ten minutes of background GPX keep one subscription, bounded timers, updat
   await h.session.dispose(); assert.equal(h.clock.tasks, 0)
 })
 
-test('screen mode supports always-on and explicit automatic screen-off even during recording', async () => {
+test('screen modes keep the native display awake and only cover the UI in automatic mode', async () => {
   const h = harness(); h.session.acquire(() => {})
   h.session.changeScreenMode()
   assert.equal(h.session.snapshot().screenModeText, '始终常亮')
   h.clock.advance(60000); assert.equal(h.screen.at(-1), true)
+  assert.equal(h.session.snapshot().screenCovered, false)
   h.session.changeScreenMode()
   assert.match(h.session.snapshot().screenModeText, /自动熄屏/)
   await h.session.toggleRecording()
-  h.clock.advance(10000); assert.equal(h.screen.at(-1), false)
+  h.clock.advance(10000); assert.equal(h.screen.at(-1), true)
+  assert.equal(h.session.snapshot().screenCovered, true)
   h.session.suspend(); h.session.resume()
-  h.clock.advance(10000); assert.equal(h.screen.at(-1), false)
+  h.clock.advance(10000); assert.equal(h.screen.at(-1), true)
+  assert.equal(h.session.snapshot().screenCovered, true)
   await h.session.toggleRecording(); await h.session.dispose()
   const fresh = harness()
   assert.equal(fresh.session.snapshot().screenModeText, '记录时常亮', 'preferences are not saved to storage')
   await fresh.session.dispose()
+})
+
+test('ten minutes behind the black cover keep GPS, altitude, recording and statistics in the foreground', async () => {
+  const h = harness(); const values = []; h.session.acquire(value => values.push(value))
+  h.session.changeScreenMode(); h.session.changeScreenMode()
+  await h.session.toggleRecording()
+  let coveredTimerCount
+  for (let i = 0; i < 600; i++) {
+    h.subscriptions[0].callback({ ...sample, speed: i % 2 ? 20 : 10, altitude: 100 + i / 10 })
+    h.clock.advance(1000); await settle()
+    if (i === 9) coveredTimerCount = h.clock.tasks
+    if (i >= 9) {
+      assert.equal(h.session.snapshot().screenCovered, true)
+      assert.equal(h.clock.tasks, coveredTimerCount)
+    }
+  }
+  assert.ok(h.screen.every(value => value === true), 'virtual screen-off must never release native keepScreenOn')
+  assert.equal(h.session.snapshot().recordPoints, 600)
+  assert.equal(h.session.snapshot().average, '54.0'); assert.equal(h.session.snapshot().maximum, '72.0')
+  assert.equal(h.session.snapshot().altitude, '159.9')
+  assert.equal(h.subscriptions.length, 1); assert.equal(h.unsubscribes, 0); assert.equal(h.requests.length, 0)
+  assert.equal(values.at(-1).statusColor, '#7ef7c5')
+  h.clock.advance(5000); await settle()
+  assert.equal(values.at(-1).statusColor, '#f2bf68', 'the covered GPS indicator reflects stale readings')
+  const averageBeforeWake = h.session.snapshot().average
+  h.session.interact()
+  assert.equal(h.session.snapshot().screenCovered, false)
+  assert.equal(h.session.snapshot().average, averageBeforeWake)
+  h.clock.advance(9999); assert.equal(h.session.snapshot().screenCovered, false)
+  h.clock.advance(1); assert.equal(h.session.snapshot().screenCovered, true)
+  await h.session.toggleRecording()
+  const text = [...h.fs.data].find(([uri]) => uri.endsWith('.gpx'))[1]
+  assert.doesNotMatch(text, /event=hide|event=tick|[\r\n]/)
+  assert.ok(text.endsWith('</trkseg></trk></gpx>'))
+  await h.session.dispose(); assert.equal(h.screen.at(-1), false); assert.equal(h.clock.tasks, 0)
+})
+
+test('touching the UI restarts its idle delay and leaving the app clears the overlay timer', async () => {
+  const h = harness(); h.session.acquire(() => {})
+  h.clock.advance(9000); h.session.interact(); h.clock.advance(9000)
+  assert.equal(h.session.snapshot().screenCovered, false)
+  h.clock.advance(1000); assert.equal(h.session.snapshot().screenCovered, true)
+  h.session.interact(); h.session.suspend(); h.clock.advance(10000)
+  assert.equal(h.session.snapshot().screenCovered, false); assert.equal(h.screen.at(-1), false)
+  h.session.resume(); h.clock.advance(10000)
+  assert.equal(h.session.snapshot().screenCovered, true); assert.equal(h.screen.at(-1), true)
+  await h.session.dispose(); h.session.interact(); h.clock.advance(10000)
+  assert.equal(h.clock.tasks, 0); assert.equal(h.screen.at(-1), false)
 })
 
 test('recorded background lifecycle notes diagnose interruption without creating other persisted data', async () => {

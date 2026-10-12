@@ -12,7 +12,7 @@ export function createReadingPage(pageIndex = 0) {
       statusText: 'GPS 搜星中', statusColor: '#f2bf68', tone: 'warning',
       detailNote: '尚未获取位置',
       gpsSubscription: '定位订阅：未启动', gpsCallbacks: '订阅尚未启动', gpsError: '', gpsAltitude: '尚未收到海拔',
-      screenModeText: '记录时常亮', screenError: '',
+      screenModeText: '记录时常亮', screenError: '', screenCovered: false,
       recording: false, saving: false, recordText: '记录', recordNotice: '', recordDuration: '0:00', recordPoints: 0
     },
     onInit() {
@@ -23,7 +23,8 @@ export function createReadingPage(pageIndex = 0) {
       this._navigation = createNavigation(router, pageIndex, this.$app.$def.clock)
       this._listener = current => {
         if (this._destroyed) return
-        const values = { ...current, ...dashboardLayout(this._layout, current.speed) }
+        const values = current.screenCovered ? { screenCovered: true, statusColor: current.statusColor } :
+          { ...current, ...dashboardLayout(this._layout, current.speed) }
         Object.keys(values).forEach(key => { if (this[key] !== values[key]) this[key] = values[key] })
       }
       device.getInfo({ success: info => {
@@ -43,13 +44,28 @@ export function createReadingPage(pageIndex = 0) {
     changeUnit() { this._session.changeUnit() },
     changeScreenMode() { this._session.changeScreenMode() },
     refreshLocation() { this._session.refreshLocation() },
+    wakeScreen() { this._session.interact() },
     openPosition() { this._navigation.go(1) },
     openTracks() { this._navigation.go(2) },
     back() { this._navigation.go(0) },
-    onBackPress() { if (pageIndex) { this.back(); return true } return false },
-    onTouchStart(event) { this._navigation.start(event) },
-    onTouchMove(event) { this._navigation.move(event) },
-    onTouchEnd(event) { if (!this._destroyed && this._listening) this._navigation.end(event) },
+    onBackPress() {
+      if (this.screenCovered) { this.wakeScreen(); return true }
+      if (pageIndex) { this.back(); return true }
+      return false
+    },
+    onTouchStart(event) {
+      if (this.screenCovered) return
+      this._session.interact(); this._navigation.start(event)
+    },
+    onTouchMove(event) {
+      if (this.screenCovered) return
+      this._session.interact(); this._navigation.move(event)
+    },
+    onTouchEnd(event) {
+      if (!this._destroyed && this._listening && !this.screenCovered) {
+        this._session.interact(); this._navigation.end(event)
+      }
+    },
     async toggleRecording() {
       try { await this._session.toggleRecording() }
       catch (error) { if (!this._destroyed) this.recordNotice = error.message }

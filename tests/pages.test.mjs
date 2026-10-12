@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { load, fakeFiles, settle } from './helpers.mjs'
+import { load, fakeFiles, fakeClock, settle } from './helpers.mjs'
 const { createRecorder } = await load('../src/common/recording.js')
 let counter = 0
 async function mockedModule(path, apis, ux = false) {
@@ -181,4 +181,81 @@ test('recording errors appear in the visible notice and cannot update a destroye
   operation = vm.toggleRecording(); vm.onDestroy()
   reject(new Error('迟到的错误')); await operation
   assert.equal(vm.recordNotice, '文件操作失败')
+})
+
+test('all pages use a full-screen cover above their padded contents with an isolated wake handler', async () => {
+  for (const page of ['index/index', 'position/position', 'tracks/tracks']) {
+    const ux = await readFile(new URL('../src/pages/' + page + '.ux', import.meta.url), 'utf8')
+    const template = ux.match(/<template>([\s\S]*?)<\/template>/)[1].trim()
+    assert.ok(template.startsWith('<stack class="screen">'))
+    assert.ok(template.endsWith('</stack>'))
+    assert.match(template, /<\/div>\s*<div if="\{\{screenCovered\}\}" class="sleep-cover" onclick="wakeScreen">/)
+    assert.match(template, /class="sleep-dot" style="background-color: \{\{statusColor\}\};"/)
+  }
+})
+
+test('covered reading pages only paint GPS status and consume back/swipe without navigating or ending recording', async () => {
+  const { createSession } = await load('../src/common/session.js')
+  const clock = fakeClock(); const fs = fakeFiles(); const routes = []; let stream
+  const session = createSession({ file: fs.api, brightness: { setKeepScreenOn() {} },
+    geolocation: { subscribe(options) { stream = options }, unsubscribe() {} }
+  }, clock)
+  session.activate()
+  const { createReadingPage } = await mockedModule('../src/common/page.js', {
+    '@system.device': { getInfo(o) { o.success({ screenWidth: 432, screenHeight: 514 }) } },
+    '@system.router': { replace(o) { routes.push(o.uri) } }
+  })
+  for (const index of [0, 1]) {
+    const page = createReadingPage(index)
+    const vm = { ...page, ...page.private, $app: { $def: { session, clock } } }
+    vm.onInit(); vm.onShow()
+    if (index === 0) { session.changeScreenMode(); session.changeScreenMode(); await session.toggleRecording() }
+    stream.callback({ latitude: 31, longitude: 121, altitude: 12, speed: 10 })
+    clock.advance(10000); await settle()
+    assert.equal(vm.screenCovered, true)
+    const previousSpeed = vm.speed
+    stream.callback({ latitude: 31, longitude: 121, altitude: 13, speed: 20 })
+    assert.equal(vm.speed, previousSpeed, 'covered reading rows do not repaint')
+    assert.equal(vm.statusColor, '#7ef7c5')
+    vm.onTouchStart({ touches: [{ clientX: 200, clientY: 100 }] })
+    vm.onTouchEnd({ changedTouches: [{ clientX: 20, clientY: 100 }] })
+    assert.deepEqual(routes, [])
+    vm.wakeScreen()
+    assert.equal(vm.screenCovered, false); assert.equal(vm.speed, '72')
+    assert.equal(session.snapshot().recording, true)
+    clock.advance(10000); await settle()
+    assert.equal(vm.onBackPress(), true)
+    assert.equal(vm.screenCovered, false); assert.deepEqual(routes, [])
+    vm.onHide(); vm.onDestroy()
+  }
+  await session.dispose()
+})
+
+test('waking the covered track page preserves selected file and delete confirmation', async () => {
+  const { createSession } = await load('../src/common/session.js')
+  const clock = fakeClock(); const fs = fakeFiles(); const recorder = createRecorder(fs.api, () => {})
+  await recorder.start(100000); const uri = await recorder.finish()
+  let stream; const routes = []
+  const session = createSession({ file: fs.api, brightness: { setKeepScreenOn() {} },
+    geolocation: { subscribe(options) { stream = options }, unsubscribe() {} }
+  }, clock)
+  session.activate(); session.changeScreenMode(); session.changeScreenMode()
+  const { default: page } = await mockedModule('../src/pages/tracks/tracks.ux', {
+    '@system.file': fs.api,
+    '@system.device': { getInfo(o) { o.success({ screenWidth: 432, screenHeight: 514 }) } },
+    '@system.router': { replace(o) { routes.push(o.uri) } }
+  }, true)
+  const vm = { ...page, ...page.private, $app: { $def: { session, clock } } }
+  vm.onInit(); vm.onShow(); await settle(); await settle()
+  await vm.selectFile(uri); await vm.deleteSelected()
+  clock.advance(10000)
+  assert.equal(vm.screenCovered, true)
+  stream.callback({ latitude: 31, longitude: 121, speed: 10, altitude: 13 })
+  assert.equal(vm.statusColor, '#7ef7c5')
+  assert.equal(vm.onBackPress(), true)
+  assert.equal(vm.screenCovered, false); assert.equal(vm.selectedUri, uri); assert.equal(vm.confirmDelete, true)
+  assert.equal(fs.data.has(uri), true); assert.deepEqual(routes, [])
+  clock.advance(10000); vm.wakeScreen()
+  assert.equal(vm.screenCovered, false); assert.equal(vm.selectedUri, uri)
+  vm.onHide(); vm.onDestroy(); await session.dispose()
 })

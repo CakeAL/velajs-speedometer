@@ -1,38 +1,43 @@
 <template>
-  <div class="page {{pageClass}}" ontouchstart="onTouchStart" ontouchmove="onTouchMove" ontouchend="onTouchEnd">
-    <div class="header {{narrow ? 'band-header' : ''}}"><text class="title {{narrow ? 'band-title' : ''}}">定位详情</text></div>
-    <list class="readings">
-      <list-item type="screen" class="screen-row {{narrow ? 'band-screen-row' : ''}}">
-        <div class="action secondary screen-button {{narrow ? 'band-screen-button' : ''}}" onclick="changeScreenMode"><text class="action-text {{narrow ? 'band-action-text' : ''}}">{{screenModeText}}</text></div>
-      </list-item>
-      <list-item if="{{screenError}}" type="screen-error" class="notice-row {{narrow ? 'band-notice-row' : ''}}"><text class="hint {{narrow ? 'band-hint' : ''}}">{{screenError}}</text></list-item>
-      <list-item type="coordinate" class="coordinate-card {{narrow ? 'band-coordinate-card' : ''}}">
-        <text class="reading-label {{narrow ? 'band-reading-label' : ''}}">{{latitudeDirection}}</text>
-        <text class="coordinate-value {{narrow ? 'band-coordinate-value' : ''}}">{{latitudeNumber}}{{latitudeNumber === '--' ? '' : '°'}}</text>
-      </list-item>
-      <list-item type="coordinate" class="coordinate-card {{narrow ? 'band-coordinate-card' : ''}}">
-        <text class="reading-label {{narrow ? 'band-reading-label' : ''}}">{{longitudeDirection}}</text>
-        <text class="coordinate-value {{narrow ? 'band-coordinate-value' : ''}}">{{longitudeNumber}}{{longitudeNumber === '--' ? '' : '°'}}</text>
-      </list-item>
-      <list-item type="metrics" class="bottom-readings {{narrow ? 'band-bottom-readings' : ''}}">
-        <div class="small-card {{narrow ? 'band-small-card' : ''}}"><text class="reading-label {{narrow ? 'band-reading-label' : ''}}">海拔 · m</text><text class="reading-value {{narrow ? 'band-reading-value' : ''}}">{{altitude}}</text></div>
-        <div class="small-card {{narrow ? 'band-small-card' : ''}}"><text class="reading-label {{narrow ? 'band-reading-label' : ''}}">水平精度</text><text class="reading-value accuracy {{narrow ? 'band-reading-value' : ''}}">{{accuracy}}</text></div>
-      </list-item>
-      <list-item type="notice" class="notice-row {{narrow ? 'band-notice-row' : ''}}"><text class="hint {{narrow ? 'band-hint' : ''}}">{{detailNote}}</text></list-item>
-      <list-item type="diagnostics" class="diagnostics {{narrow ? 'band-diagnostics' : ''}}">
-        <text class="diagnostic-text {{narrow ? 'band-diagnostic-text' : ''}}">{{gpsSubscription}}</text>
-        <text class="diagnostic-text {{narrow ? 'band-diagnostic-text' : ''}}">{{gpsCallbacks}}</text>
-        <text class="diagnostic-text {{narrow ? 'band-diagnostic-text' : ''}}">{{gpsAltitude}}</text>
-        <text if="{{gpsError}}" class="diagnostic-text {{narrow ? 'band-diagnostic-text' : ''}}">{{gpsError}}</text>
-      </list-item>
-      <list-item type="refresh" class="screen-row {{narrow ? 'band-screen-row' : ''}}">
-        <div class="action secondary screen-button {{narrow ? 'band-screen-button' : ''}}" onclick="refreshLocation"><text class="action-text {{narrow ? 'band-action-text' : ''}}">刷新定位</text></div>
-      </list-item>
-    </list>
-    <div class="footer position-footer {{narrow ? 'band-footer' : ''}} {{narrow ? 'band-position-footer' : ''}}">
-      <div class="action secondary back-button {{narrow ? 'band-action' : ''}}" onclick="back"><text class="action-text {{narrow ? 'band-action-text' : ''}}">返回测速</text></div>
+  <stack class="screen">
+    <div class="page {{pageClass}}" ontouchstart="onTouchStart" ontouchmove="onTouchMove" ontouchend="onTouchEnd">
+      <div class="header {{narrow ? 'band-header' : ''}}"><text class="title {{narrow ? 'band-title' : ''}}">定位详情</text></div>
+      <list class="readings">
+        <list-item type="screen" class="screen-row {{narrow ? 'band-screen-row' : ''}}">
+          <div class="action secondary screen-button {{narrow ? 'band-screen-button' : ''}}" onclick="changeScreenMode"><text class="action-text {{narrow ? 'band-action-text' : ''}}">{{screenModeText}}</text></div>
+        </list-item>
+        <list-item if="{{screenError}}" type="screen-error" class="notice-row {{narrow ? 'band-notice-row' : ''}}"><text class="hint {{narrow ? 'band-hint' : ''}}">{{screenError}}</text></list-item>
+        <list-item type="coordinate" class="coordinate-card {{narrow ? 'band-coordinate-card' : ''}}">
+          <text class="reading-label {{narrow ? 'band-reading-label' : ''}}">{{latitudeDirection}}</text>
+          <text class="coordinate-value {{narrow ? 'band-coordinate-value' : ''}}">{{latitudeNumber}}{{latitudeNumber === '--' ? '' : '°'}}</text>
+        </list-item>
+        <list-item type="coordinate" class="coordinate-card {{narrow ? 'band-coordinate-card' : ''}}">
+          <text class="reading-label {{narrow ? 'band-reading-label' : ''}}">{{longitudeDirection}}</text>
+          <text class="coordinate-value {{narrow ? 'band-coordinate-value' : ''}}">{{longitudeNumber}}{{longitudeNumber === '--' ? '' : '°'}}</text>
+        </list-item>
+        <list-item type="metrics" class="bottom-readings {{narrow ? 'band-bottom-readings' : ''}}">
+          <div class="small-card {{narrow ? 'band-small-card' : ''}}"><text class="reading-label {{narrow ? 'band-reading-label' : ''}}">海拔 · m</text><text class="reading-value {{narrow ? 'band-reading-value' : ''}}">{{altitude}}</text></div>
+          <div class="small-card {{narrow ? 'band-small-card' : ''}}"><text class="reading-label {{narrow ? 'band-reading-label' : ''}}">水平精度</text><text class="reading-value accuracy {{narrow ? 'band-reading-value' : ''}}">{{accuracy}}</text></div>
+        </list-item>
+        <list-item type="notice" class="notice-row {{narrow ? 'band-notice-row' : ''}}"><text class="hint {{narrow ? 'band-hint' : ''}}">{{detailNote}}</text></list-item>
+        <list-item type="diagnostics" class="diagnostics {{narrow ? 'band-diagnostics' : ''}}">
+          <text class="diagnostic-text {{narrow ? 'band-diagnostic-text' : ''}}">{{gpsSubscription}}</text>
+          <text class="diagnostic-text {{narrow ? 'band-diagnostic-text' : ''}}">{{gpsCallbacks}}</text>
+          <text class="diagnostic-text {{narrow ? 'band-diagnostic-text' : ''}}">{{gpsAltitude}}</text>
+          <text if="{{gpsError}}" class="diagnostic-text {{narrow ? 'band-diagnostic-text' : ''}}">{{gpsError}}</text>
+        </list-item>
+        <list-item type="refresh" class="screen-row {{narrow ? 'band-screen-row' : ''}}">
+          <div class="action secondary screen-button {{narrow ? 'band-screen-button' : ''}}" onclick="refreshLocation"><text class="action-text {{narrow ? 'band-action-text' : ''}}">刷新定位</text></div>
+        </list-item>
+      </list>
+      <div class="footer position-footer {{narrow ? 'band-footer' : ''}} {{narrow ? 'band-position-footer' : ''}}">
+        <div class="action secondary back-button {{narrow ? 'band-action' : ''}}" onclick="back"><text class="action-text {{narrow ? 'band-action-text' : ''}}">返回测速</text></div>
+      </div>
     </div>
-  </div>
+    <div if="{{screenCovered}}" class="sleep-cover" onclick="wakeScreen">
+      <div class="sleep-dot" style="background-color: {{statusColor}};"></div>
+    </div>
+  </stack>
 </template>
 <script>
 import { createReadingPage } from '../../common/page'

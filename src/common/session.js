@@ -19,6 +19,7 @@ export function createSession(deps, clock) {
   let listeners = []
   let foreground = true
   let screenMode = 0
+  let screenCovered = false
   let screenError = ''
   let trackingRequested = false
   let tickTimer = null
@@ -40,7 +41,7 @@ export function createSession(deps, clock) {
       statusText: STATUS[state.phase] || STATUS.error,
       statusColor: readings.tone === 'good' ? '#7ef7c5' : '#f2bf68',
       recording: record.recording, saving: record.saving,
-      screenModeText: SCREEN_MODES[screenMode], screenError,
+      screenModeText: SCREEN_MODES[screenMode], screenError, screenCovered,
       recordText: record.saving ? '保存中' : (record.recording ? '结束' : '记录'),
       recordDuration: duration, recordPoints: record.points,
       recordNotice: record.recording ? '' : record.message }
@@ -65,17 +66,23 @@ export function createSession(deps, clock) {
   function releaseScreen() {
     if (screenTimer !== null) time.clearTimeout(screenTimer)
     screenTimer = null
+    screenCovered = false
     keepScreenOn(false)
   }
   function holdScreenBriefly() {
     if (screenTimer !== null) time.clearTimeout(screenTimer)
     screenTimer = null
     if (!foreground || disposed) { keepScreenOn(false); return }
+    screenCovered = false
     keepScreenOn(true)
     if (screenMode === 1 || (screenMode === 0 && (record.recording || record.saving))) return
     screenTimer = time.setTimeout(() => {
       screenTimer = null
-      keepScreenOn(false)
+      if (!foreground || disposed || screenError) return
+      // Keep the native screen awake. This is an in-app overlay, so GPS,
+      // recording and statistics continue in the same foreground session.
+      screenCovered = true
+      emit()
     }, SCREEN_HOLD_MS)
   }
   function enterForeground() {
@@ -181,6 +188,10 @@ export function createSession(deps, clock) {
     changeScreenMode() {
       if (disposed) return
       screenMode = (screenMode + 1) % SCREEN_MODES.length
+      holdScreenBriefly(); emit()
+    },
+    interact() {
+      if (!foreground || disposed) return
       holdScreenBriefly(); emit()
     },
     refreshLocation() {

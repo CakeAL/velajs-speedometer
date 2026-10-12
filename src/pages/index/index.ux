@@ -1,37 +1,42 @@
 <template>
-  <div class="page {{pageClass}}" ontouchstart="onTouchStart" ontouchmove="onTouchMove" ontouchend="onTouchEnd">
-    <div class="header {{narrow ? 'band-header' : ''}}">
-      <div class="status-dot" style="background-color: {{statusColor}};"></div>
-      <text class="status-text {{narrow ? 'band-status-text' : ''}}">{{statusText}}</text>
+  <stack class="screen">
+    <div class="page {{pageClass}}" ontouchstart="onTouchStart" ontouchmove="onTouchMove" ontouchend="onTouchEnd">
+      <div class="header {{narrow ? 'band-header' : ''}}">
+        <div class="status-dot" style="background-color: {{statusColor}};"></div>
+        <text class="status-text {{narrow ? 'band-status-text' : ''}}">{{statusText}}</text>
+      </div>
+      <list class="dashboard">
+        <list-item type="speed" class="speed-row" style="height: {{speedHeight}}px;">
+          <text class="speed {{tone}}" style="font-size: {{speedFont}}px; height: {{speedHeight}}px;">{{speed}}</text>
+        </list-item>
+        <list-item type="unit" class="unit-button" style="height: {{unitHeight}}px;" onclick="changeUnit"><text class="unit {{narrow ? 'band-unit' : ''}}">{{unit}} · 切换</text></list-item>
+        <list-item type="stats" class="metrics" style="height: {{metricsHeight}}px;">
+          <div class="metric"><text class="metric-label {{narrow ? 'band-metric-label' : ''}}">本次平均</text><text class="metric-value {{narrow ? 'band-metric-value' : ''}}">{{average}}</text></div>
+          <div class="metric-divider"></div>
+          <div class="metric"><text class="metric-label {{narrow ? 'band-metric-label' : ''}}">本次最高</text><text class="metric-value {{narrow ? 'band-metric-value' : ''}}">{{maximum}}</text></div>
+        </list-item>
+        <list-item type="summary" class="summary {{narrow ? 'band-summary' : ''}}" style="height: {{summaryHeight}}px;">
+          <text if="{{recordNotice}}" class="hint {{narrow ? 'band-hint' : ''}}">{{recordNotice}}</text>
+          <div if="{{!recordNotice}}" class="summary-metric {{narrow ? 'band-summary-metric' : ''}}">
+            <text class="summary-label {{narrow ? 'band-summary-label' : ''}}">海拔 · m</text>
+            <text class="summary-value {{narrow ? 'band-summary-value' : ''}}">{{altitude}}</text>
+          </div>
+          <div if="{{!recordNotice}}" class="summary-metric {{narrow ? 'band-summary-metric' : ''}}">
+            <text class="summary-label {{narrow ? 'band-summary-label' : ''}}">{{recording ? '记录 · ' + recordPoints + ' 点' : 'GPS 更新'}}</text>
+            <text class="summary-value {{recording ? 'good' : ''}} {{narrow ? 'band-summary-value' : ''}}">{{recording ? recordDuration : detailNote}}</text>
+          </div>
+        </list-item>
+      </list>
+      <div class="footer {{narrow ? 'band-footer' : ''}}">
+        <div class="action primary record-action {{narrow ? 'band-action' : ''}}" onclick="toggleRecording"><text class="action-text primary-text {{narrow ? 'band-action-text' : ''}}">{{recordText}}</text></div>
+        <div class="action secondary {{narrow ? 'band-action' : ''}}" onclick="openPosition"><text class="action-text {{narrow ? 'band-action-text' : ''}}">详情</text></div>
+        <div class="action secondary {{narrow ? 'band-action' : ''}}" onclick="openTracks"><text class="action-text {{narrow ? 'band-action-text' : ''}}">轨迹</text></div>
+      </div>
     </div>
-    <list class="dashboard">
-      <list-item type="speed" class="speed-row" style="height: {{speedHeight}}px;">
-        <text class="speed {{tone}}" style="font-size: {{speedFont}}px; height: {{speedHeight}}px;">{{speed}}</text>
-      </list-item>
-      <list-item type="unit" class="unit-button" style="height: {{unitHeight}}px;" onclick="changeUnit"><text class="unit {{narrow ? 'band-unit' : ''}}">{{unit}} · 切换</text></list-item>
-      <list-item type="stats" class="metrics" style="height: {{metricsHeight}}px;">
-        <div class="metric"><text class="metric-label {{narrow ? 'band-metric-label' : ''}}">本次平均</text><text class="metric-value {{narrow ? 'band-metric-value' : ''}}">{{average}}</text></div>
-        <div class="metric-divider"></div>
-        <div class="metric"><text class="metric-label {{narrow ? 'band-metric-label' : ''}}">本次最高</text><text class="metric-value {{narrow ? 'band-metric-value' : ''}}">{{maximum}}</text></div>
-      </list-item>
-      <list-item type="summary" class="summary {{narrow ? 'band-summary' : ''}}" style="height: {{summaryHeight}}px;">
-        <text if="{{recordNotice}}" class="hint {{narrow ? 'band-hint' : ''}}">{{recordNotice}}</text>
-        <div if="{{!recordNotice}}" class="summary-metric {{narrow ? 'band-summary-metric' : ''}}">
-          <text class="summary-label {{narrow ? 'band-summary-label' : ''}}">海拔 · m</text>
-          <text class="summary-value {{narrow ? 'band-summary-value' : ''}}">{{altitude}}</text>
-        </div>
-        <div if="{{!recordNotice}}" class="summary-metric {{narrow ? 'band-summary-metric' : ''}}">
-          <text class="summary-label {{narrow ? 'band-summary-label' : ''}}">{{recording ? '记录 · ' + recordPoints + ' 点' : 'GPS 更新'}}</text>
-          <text class="summary-value {{recording ? 'good' : ''}} {{narrow ? 'band-summary-value' : ''}}">{{recording ? recordDuration : detailNote}}</text>
-        </div>
-      </list-item>
-    </list>
-    <div class="footer {{narrow ? 'band-footer' : ''}}">
-      <div class="action primary record-action {{narrow ? 'band-action' : ''}}" onclick="toggleRecording"><text class="action-text primary-text {{narrow ? 'band-action-text' : ''}}">{{recordText}}</text></div>
-      <div class="action secondary {{narrow ? 'band-action' : ''}}" onclick="openPosition"><text class="action-text {{narrow ? 'band-action-text' : ''}}">详情</text></div>
-      <div class="action secondary {{narrow ? 'band-action' : ''}}" onclick="openTracks"><text class="action-text {{narrow ? 'band-action-text' : ''}}">轨迹</text></div>
+    <div if="{{screenCovered}}" class="sleep-cover" onclick="wakeScreen">
+      <div class="sleep-dot" style="background-color: {{statusColor}};"></div>
     </div>
-  </div>
+  </stack>
 </template>
 <script>
 import { createReadingPage } from '../../common/page'
