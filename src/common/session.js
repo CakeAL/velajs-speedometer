@@ -40,7 +40,10 @@ export function createSession(deps, clock) {
   }
   function emit() {
     if (!foreground) return
-    const current = view(); listeners.slice().forEach(listener => listener(current))
+    const current = view()
+    listeners.slice().forEach(listener => {
+      try { listener(current) } catch (error) { console.error('页面更新失败：' + error.message) }
+    })
   }
   function keepScreenOn(enabled) {
     try { deps.brightness.setKeepScreenOn({ keepScreenOn: enabled, fail() {} }) } catch (error) { /* Optional on older firmware. */ }

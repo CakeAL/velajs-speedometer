@@ -10,9 +10,10 @@ export function createAppClock() {
       if (!job || now < job.at) return
       if (job.repeat) job.at = now + job.repeat
       else delete jobs[id]
-      job.callback()
+      try { job.callback() }
+      catch (error) { console.error('应用定时任务失败：' + error.message) }
     })
-  }, 100)
+  }, 250)
   function register(callback, delay, repeat) {
     const id = ++nextId
     jobs[id] = { callback, at: Date.now() + delay, repeat }
