@@ -190,3 +190,19 @@ test('finishing or failing a background recording keeps GPS live until app destr
     await h.session.dispose(); assert.equal(h.unsubscribes, 1); assert.equal(h.clock.tasks, 0)
   }
 })
+
+test('a synchronous initial timeout cannot later tear down the successfully attached GPS stream', async () => {
+  const clock = fakeClock(); const fs = fakeFiles(); let streams = 0; let unsubscribes = 0
+  const session = createSession({
+    file: fs.api, brightness: { setKeepScreenOn() {} },
+    geolocation: {
+      getLocation(options) { options.fail('timeout', 204) },
+      subscribe() { streams++ }, unsubscribe() { unsubscribes++ }
+    }
+  }, clock)
+  session.activate(); clock.advance(180000)
+  assert.equal(streams, 1); assert.equal(unsubscribes, 0)
+  assert.match(session.snapshot().gpsError, /单次定位错误 204/)
+  assert.equal(fs.data.size, 0, 'diagnostics remain in memory only')
+  await session.dispose(); assert.equal(unsubscribes, 1); assert.equal(clock.tasks, 0)
+})

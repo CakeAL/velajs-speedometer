@@ -25,7 +25,7 @@ async function mockedModule(path, apis, ux = false) {
   finally { delete globalThis[key] }
 }
 
-test('app lifecycle owns GPS before pages exist and keeps it through app hide until destruction', async () => {
+test('app starts GPS on first foreground entry and keeps it through app hide until destruction', async () => {
   const fs = fakeFiles(); const calls = []
   const { default: definition } = await mockedModule('../src/app.ux', {
     '@system.file': fs.api,
@@ -39,12 +39,14 @@ test('app lifecycle owns GPS before pages exist and keeps it through app hide un
   const app = { ...definition }
   try {
     app.onCreate()
-    assert.deepEqual(calls, ['subscribe', 'snapshot'], 'native GPS starts in app.onCreate without a page')
+    assert.deepEqual(calls, [], 'creation does not request GPS before the app becomes visible')
+    app.onShow()
+    assert.deepEqual(calls, ['snapshot', 'subscribe'], 'foreground entry requests the initial fix before subscribing')
     app.onHide(); app.onShow()
-    assert.deepEqual(calls, ['subscribe', 'snapshot'], 'hiding and waking do not reacquire GPS')
+    assert.deepEqual(calls, ['snapshot', 'subscribe'], 'hiding and waking do not reacquire GPS')
     assert.equal(fs.data.size, 0)
   } finally { app.onDestroy() }
-  assert.deepEqual(calls, ['subscribe', 'snapshot', 'unsubscribe'])
+  assert.deepEqual(calls, ['snapshot', 'subscribe', 'unsubscribe'])
 })
 
 test('remote deletion removes the visible track and closes its selected detail', async () => {

@@ -69,6 +69,7 @@ export function locationView(state, unitIndex, now) {
   const speedStale = tracking && ageMs >= SPEED_STALE_AFTER
   const latitude = coordinateView(fix && fix.latitude, true)
   const longitude = coordinateView(fix && fix.longitude, false)
+  const diagnostics = state.diagnostics
   return {
     speed,
     unit: unit.label,
@@ -77,6 +78,9 @@ export function locationView(state, unitIndex, now) {
     longitudeNumber: longitude.number, longitudeDirection: longitude.direction,
     accuracy: fix && fix.accuracy !== null ? '±' + Math.round(fix.accuracy) + ' m' : '--',
     detailNote: state.updatedAt === null ? '尚未获取位置' : (fresh ? Math.floor(ageMs / 1000) + ' 秒前更新' : '等待新的位置'),
+    gpsRequest: diagnostics ? '单次定位：' + diagnostics.snapshot : '单次定位：未启动',
+    gpsCallbacks: diagnostics ? '订阅回调 ' + diagnostics.stream + ' 次 · 无效 ' + diagnostics.invalid + ' 次' : '订阅尚未启动',
+    gpsError: diagnostics && diagnostics.error ? diagnostics.error : '',
     tone: fresh && !speedStale ? (fix.accuracy !== null && fix.accuracy > 50 ? 'warning' : 'good') :
       (state.phase === 'paused' ? 'muted' : 'warning')
   }
@@ -93,8 +97,9 @@ export function createLocationTracker(api, onChange, clock) {
   let subscribed = false
   let revision = 0
   let startedAt = 0
+  let diagnostics = { snapshot: '未启动', stream: 0, invalid: 0, error: '' }
 
-  function emit() { onChange({ ...state }) }
+  function emit() { onChange({ ...state, diagnostics: { ...diagnostics } }) }
 
   function cleanup() {
     active = false
@@ -107,15 +112,18 @@ export function createLocationTracker(api, onChange, clock) {
     }
   }
 
-  function fail(code, terminal) {
+  function fail(code, terminal, data) {
     code = Number(code)
-    if (!terminal && state.fix) return
+    diagnostics.error = (terminal ? '订阅' : '单次定位') + '错误 ' + (isFinite(code) ? code : '未知') +
+      (typeof data === 'string' && data ? ' · ' + data.slice(0, 80) : '')
+    if (!terminal) diagnostics.snapshot = code === 204 ? '超时 (204)' : '失败'
+    if (!terminal && state.fix) { emit(); return }
     if (terminal) cleanup()
     let phase = 'error'
     if (code === 203) phase = 'unsupported'
     if (code === 204) phase = terminal ? 'error' : 'timeout'
     if ([201, 207, 400, 402].indexOf(code) >= 0) phase = 'denied'
-    if (!terminal && subscribed && phase !== 'timeout' && phase !== 'denied') {
+    if (!terminal && phase !== 'timeout' && phase !== 'denied') {
       phase = 'locating'
     }
     state = { ...state, phase }
@@ -125,7 +133,7 @@ export function createLocationTracker(api, onChange, clock) {
   function accept(data) {
     const fix = normalizeLocation(data)
     // Invalid callbacks must not extend the lifetime of an old speed reading.
-    if (!fix) return
+    if (!fix) { diagnostics.invalid += 1; emit(); return }
     revision += 1
     state = { phase: 'live', fix, updatedAt: time.now() }
     emit()
@@ -151,32 +159,43 @@ export function createLocationTracker(api, onChange, clock) {
       generation += 1
       revision = 0
       startedAt = time.now()
+      diagnostics.snapshot = '等待返回'
+      diagnostics.error = ''
       const token = generation
       const current = () => active && token === generation
       state = { phase: 'locating', fix: null, updatedAt: null }
       emit()
       timer = time.setInterval(tick, 1000)
-      // Establish the long-lived background feature before requesting a snapshot.
-      // Neither waits for a fix; a late snapshot cannot overwrite the stream.
+      // Request the first fix and attach the stream immediately. This ordering
+      // is a compatibility trial, not a documented guarantee of faster GPS.
+      try {
+        api.getLocation({
+          timeout: INITIAL_TIMEOUT,
+          success(data) {
+            if (!current()) return
+            diagnostics.snapshot = '已返回'
+            if (revision === 0) accept(data)
+            else emit()
+          },
+          fail(data, code) { if (current()) fail(code, false, data) }
+        })
+      } catch (error) {
+        if (current()) fail(typeof api.getLocation === 'function' ? -1 : 203, false, error.message)
+      }
+      if (!current()) return
       if (typeof api.subscribe !== 'function') { fail(203, true); return }
       subscribed = true
       try {
         api.subscribe({
-          callback(data) { if (current() && subscribed) accept(data) },
-          fail(data, code) { if (current()) fail(code, true) }
+          callback(data) {
+            if (!current() || !subscribed) return
+            diagnostics.stream += 1
+            accept(data)
+          },
+          fail(data, code) { if (current()) fail(code, true, data) }
         })
       } catch (error) {
-        if (current()) fail(-1, true)
-      }
-      if (!current()) return
-      try {
-        api.getLocation({
-          timeout: INITIAL_TIMEOUT,
-          success(data) { if (current() && revision === 0) accept(data) },
-          fail(data, code) { if (current()) fail(code, false) }
-        })
-      } catch (error) {
-        if (current()) fail(typeof api.getLocation === 'function' ? -1 : 203, false)
+        if (current()) fail(-1, true, error.message)
       }
     },
     stop() {

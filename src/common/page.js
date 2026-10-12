@@ -10,6 +10,7 @@ export function createReadingPage() {
       latitudeNumber: '--', latitudeDirection: '纬度', longitudeNumber: '--', longitudeDirection: '经度',
       statusText: 'GPS 搜星中', statusColor: '#f2bf68', tone: 'warning',
       detailNote: '尚未获取位置',
+      gpsRequest: '单次定位：未启动', gpsCallbacks: '订阅尚未启动', gpsError: '',
       recording: false, saving: false, recordText: '记录', recordNotice: '', recordDuration: '0:00', recordPoints: 0
     },
     onInit() {

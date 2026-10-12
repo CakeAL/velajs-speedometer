@@ -134,7 +134,7 @@ test('starts the reference initial request and subscription immediately, once', 
   assert.equal(h.requests.length, 1)
   assert.equal(h.requests[0].timeout, 60000)
   assert.equal(h.subscriptions.length, 1)
-  assert.deepEqual(h.calls, ['subscribe', 'snapshot'])
+  assert.deepEqual(h.calls, ['snapshot', 'subscribe'])
   h.subscriptions[0].callback({ speed: '10' })
   assert.equal(h.state.phase, 'live')
   assert.equal(h.view().speed, '36')
@@ -203,12 +203,14 @@ test('an unavailable single snapshot does not mark a valid continuous GPS subscr
   h.tracker.stop(); assert.equal(h.tracker.isListening(), false)
 })
 
-test('a synchronous subscription failure cannot be hidden by starting a single snapshot afterwards', () => {
+test('a synchronous subscription failure invalidates the already pending initial snapshot', () => {
   const h = harness()
   h.api.subscribe = options => options.fail('unsupported', 203)
   h.tracker.start()
   assert.equal(h.state.phase, 'unsupported'); assert.equal(h.tracker.isListening(), false)
-  assert.equal(h.requests.length, 0); assert.equal(h.running, false)
+  assert.equal(h.requests.length, 1); assert.equal(h.running, false)
+  h.requests[0].success(sample)
+  assert.equal(h.state.phase, 'unsupported')
 })
 
 test('stale timeout keeps the subscription and never starts repeated snapshots', () => {
@@ -283,4 +285,33 @@ test('dashboard fits watch screens and keeps narrow scrolling rows and long spee
     assert.ok(rows.speedFont > 0 && rows.speedFont < rows.speedHeight)
     assert.ok(rows.speedFont * 6 * 0.65 <= (layout.pageClass === 'round-page' ? 192 : 208))
   }
+})
+
+test('watch-visible diagnostics distinguish a silent stream, rejected data and native errors', () => {
+  const h = harness(); h.tracker.start(); h.advance(60000)
+  assert.match(h.view().gpsRequest, /等待返回/)
+  assert.match(h.view().gpsCallbacks, /订阅回调 0 次/)
+  h.requests[0].fail('request timeout', 204)
+  assert.match(h.view().gpsRequest, /超时 \(204\)/)
+  assert.match(h.view().gpsError, /单次定位错误 204/)
+  h.subscriptions[0].callback({ speed: 'invalid' })
+  assert.match(h.view().gpsCallbacks, /订阅回调 1 次 · 无效 1 次/)
+  assert.equal(h.state.updatedAt, null)
+  h.subscriptions[0].callback(sample)
+  assert.equal(h.view().speed, '36')
+  assert.match(h.view().gpsCallbacks, /订阅回调 2 次 · 无效 1 次/)
+  h.subscriptions[0].fail('unsupported', 203)
+  assert.match(h.view().gpsError, /订阅错误 203/)
+  assert.equal(h.tracker.isListening(), false)
+})
+
+test('a synchronous single fix is retained while the subscription is attached afterwards', () => {
+  const h = harness()
+  h.api.getLocation = options => options.success(sample)
+  h.tracker.start()
+  assert.equal(h.view().speed, '36')
+  assert.match(h.view().gpsRequest, /已返回/)
+  assert.equal(h.tracker.isListening(), true)
+  h.subscriptions[0].callback({ ...sample, speed: 5 })
+  assert.equal(h.view().speed, '18')
 })

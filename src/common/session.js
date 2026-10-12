@@ -80,7 +80,11 @@ export function createSession(deps, clock) {
     // here can interrupt a cold start; only restart after a native stream error.
     if (retryTimer !== null || !wanted() || tracker.isListening()) return
     const delay = state.phase === 'denied' || state.phase === 'unsupported' ? 15000 : 5000
-    retryTimer = time.setTimeout(() => { retryTimer = null; if (wanted()) tracker.retry() }, delay)
+    retryTimer = time.setTimeout(() => {
+      retryTimer = null
+      // The initial request can fail synchronously before subscribe() is called.
+      if (wanted() && !tracker.isListening()) tracker.retry()
+    }, delay)
   }
   const tracker = createLocationTracker(deps.geolocation, next => {
     state = next
@@ -120,7 +124,8 @@ export function createSession(deps, clock) {
     activate() {
       if (disposed) return
       trackingRequested = true
-      // Called from app.onCreate so Vela owns the native subscription at app scope.
+      // Called from app.onShow: the app is visible and can request permission.
+      // Later foreground entries keep the same app-owned native subscription.
       start()
     },
     acquire(listener) {
