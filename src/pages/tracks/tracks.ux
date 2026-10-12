@@ -29,7 +29,7 @@
       </div>
     </div>
     <div if="{{screenCovered}}" class="sleep-cover" onclick="wakeScreen">
-      <div class="sleep-dot" style="background-color: {{statusColor}};"></div>
+      <div class="sleep-dot" style="background-color: {{statusColor}}; left: {{sleepDotLeft}}px;"></div>
     </div>
   </stack>
 </template>
@@ -60,7 +60,7 @@ export default {
   private: {
     pageClass: 'round-page', narrow: false, files: [], selectedUri: '', selectedName: '',
     pointCount: '--', duration: '--', elevation: '--', runtimeTrace: '', message: '', syncStatus: '', confirmDelete: false, busy: false,
-    screenCovered: false, statusColor: '#f2bf68'
+    screenCovered: false, statusColor: '#f2bf68', sleepDotLeft: 118
   },
   onInit() {
     this._destroyed = false
@@ -72,6 +72,7 @@ export default {
       if (this._destroyed) return
       this.screenCovered = !!current.screenCovered
       this.statusColor = current.statusColor
+      this.sleepDotLeft = current.sleepDotLeft
     }
     device.getInfo({ success: info => {
       if (this._destroyed) return

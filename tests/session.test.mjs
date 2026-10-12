@@ -371,6 +371,27 @@ test('a later successful keep-screen-on request clears its warning without chang
   await session.dispose()
 })
 
+test('the top-edge GPS dot shifts every twenty seconds without adding timers or altering the session', async () => {
+  const h = harness(); h.session.acquire(() => {})
+  h.clock.advance(10000)
+  const jobs = h.clock.tasks
+  assert.equal(h.session.snapshot().screenCovered, true)
+  assert.equal(h.session.snapshot().sleepDotLeft, 118)
+  h.clock.advance(19999); assert.equal(h.session.snapshot().sleepDotLeft, 118)
+  h.clock.advance(1); assert.equal(h.session.snapshot().sleepDotLeft, 122)
+  for (const expected of [126, 122, 118, 114, 110, 114, 118]) {
+    h.clock.advance(20000)
+    assert.equal(h.session.snapshot().sleepDotLeft, expected)
+    assert.equal(h.clock.tasks, jobs)
+  }
+  assert.equal(h.subscriptions.length, 1); assert.equal(h.unsubscribes, 0)
+  assert.equal(h.fs.data.size, 0); assert.equal(h.storageCalls, 0)
+  h.session.interact(); assert.equal(h.session.snapshot().sleepDotLeft, 118)
+  h.clock.advance(10000); assert.equal(h.session.snapshot().screenCovered, true)
+  assert.equal(h.session.snapshot().sleepDotLeft, 118)
+  await h.session.dispose(); assert.equal(h.clock.tasks, 0)
+})
+
 test('recorded background lifecycle notes diagnose interruption without creating other persisted data', async () => {
   const h = harness(); h.session.acquire(() => {})
   h.subscriptions[0].callback(sample); await h.session.toggleRecording()

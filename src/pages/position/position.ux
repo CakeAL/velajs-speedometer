@@ -35,7 +35,7 @@
       </div>
     </div>
     <div if="{{screenCovered}}" class="sleep-cover" onclick="wakeScreen">
-      <div class="sleep-dot" style="background-color: {{statusColor}};"></div>
+      <div class="sleep-dot" style="background-color: {{statusColor}}; left: {{sleepDotLeft}}px;"></div>
     </div>
   </stack>
 </template>

@@ -10,6 +10,8 @@ const STATUS = {
 
 const SCREEN_HOLD_MS = 10000
 const SCREEN_MODES = ['记录时常亮', '始终常亮', '10 秒自动熄屏']
+const DOT_SHIFT_MS = 20000
+const DOT_OFFSETS = [0, 4, 8, 4, 0, -4, -8, -4]
 
 export function createSession(deps, clock) {
   const time = clock || { now: () => Date.now(), setInterval, clearInterval, setTimeout, clearTimeout }
@@ -20,6 +22,7 @@ export function createSession(deps, clock) {
   let foreground = true
   let screenMode = 0
   let screenCovered = false
+  let coverStartedAt = null
   let screenError = ''
   let trackingRequested = false
   let tickTimer = null
@@ -37,11 +40,15 @@ export function createSession(deps, clock) {
     const readings = locationView(state, unitIndex, now)
     const elapsed = record.startedAt === null ? 0 : Math.floor((now - record.startedAt) / 1000)
     const duration = Math.floor(elapsed / 60) + ':' + ('0' + elapsed % 60).slice(-2)
+    const dotStep = screenCovered && coverStartedAt !== null ? Math.floor(Math.max(0, now - coverStartedAt) / DOT_SHIFT_MS) : 0
     return { ...readings, ...statsView(stats, UNITS[unitIndex].factor),
       statusText: STATUS[state.phase] || STATUS.error,
       statusColor: readings.tone === 'good' ? '#7ef7c5' : '#f2bf68',
       recording: record.recording, saving: record.saving,
       screenModeText: SCREEN_MODES[screenMode], screenError, screenCovered,
+      // All pages use manifest.designWidth = 240. The 4px dot starts centered
+      // and moves in 4px steps, without adding another native timer.
+      sleepDotLeft: 118 + DOT_OFFSETS[dotStep % DOT_OFFSETS.length],
       recordText: record.saving ? '保存中' : (record.recording ? '结束' : '记录'),
       recordDuration: duration, recordPoints: record.points,
       recordNotice: record.recording ? '' : record.message }
@@ -73,6 +80,7 @@ export function createSession(deps, clock) {
     if (screenTimer !== null) time.clearTimeout(screenTimer)
     screenTimer = null
     screenCovered = false
+    coverStartedAt = null
     keepScreenOn(false)
   }
   function holdScreenBriefly() {
@@ -80,6 +88,7 @@ export function createSession(deps, clock) {
     screenTimer = null
     if (!foreground || disposed) { keepScreenOn(false); return }
     screenCovered = false
+    coverStartedAt = null
     keepScreenOn(true)
     if (screenMode === 1 || (screenMode === 0 && (record.recording || record.saving))) return
     screenTimer = time.setTimeout(() => {
@@ -88,6 +97,7 @@ export function createSession(deps, clock) {
       // Keep the native screen awake. This is an in-app overlay, so GPS,
       // recording and statistics continue in the same foreground session.
       screenCovered = true
+      coverStartedAt = time.now()
       emit()
     }, SCREEN_HOLD_MS)
   }

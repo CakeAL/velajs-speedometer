@@ -12,7 +12,7 @@ export function createReadingPage(pageIndex = 0) {
       statusText: 'GPS 搜星中', statusColor: '#f2bf68', tone: 'warning',
       detailNote: '尚未获取位置',
       gpsSubscription: '定位订阅：未启动', gpsCallbacks: '订阅尚未启动', gpsError: '', gpsAltitude: '尚未收到海拔',
-      screenModeText: '记录时常亮', screenError: '', screenCovered: false,
+      screenModeText: '记录时常亮', screenError: '', screenCovered: false, sleepDotLeft: 118,
       recording: false, saving: false, recordText: '记录', recordNotice: '', recordDuration: '0:00', recordPoints: 0
     },
     onInit() {
@@ -23,7 +23,7 @@ export function createReadingPage(pageIndex = 0) {
       this._navigation = createNavigation(router, pageIndex, this.$app.$def.clock)
       this._listener = current => {
         if (this._destroyed) return
-        const values = current.screenCovered ? { screenCovered: true, statusColor: current.statusColor } :
+        const values = current.screenCovered ? { screenCovered: true, statusColor: current.statusColor, sleepDotLeft: current.sleepDotLeft } :
           { ...current, ...dashboardLayout(this._layout, current.speed) }
         Object.keys(values).forEach(key => { if (this[key] !== values[key]) this[key] = values[key] })
       }

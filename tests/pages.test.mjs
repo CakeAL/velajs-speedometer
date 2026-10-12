@@ -190,8 +190,10 @@ test('all pages use a full-screen cover above their padded contents with an isol
     assert.ok(template.startsWith('<stack class="screen">'))
     assert.ok(template.endsWith('</stack>'))
     assert.match(template, /<\/div>\s*<div if="\{\{screenCovered\}\}" class="sleep-cover" onclick="wakeScreen">/)
-    assert.match(template, /class="sleep-dot" style="background-color: \{\{statusColor\}\};"/)
+    assert.match(template, /class="sleep-dot" style="background-color: \{\{statusColor\}\}; left: \{\{sleepDotLeft\}\}px;"/)
   }
+  const styles = await readFile(new URL('../src/common/page.less', import.meta.url), 'utf8')
+  assert.match(styles, /\.sleep-dot \{ position: absolute; top: 8px; width: 4px; height: 4px;/)
 })
 
 test('covered reading pages only paint GPS status and consume back/swipe without navigating or ending recording', async () => {
@@ -217,6 +219,10 @@ test('covered reading pages only paint GPS status and consume back/swipe without
     stream.callback({ latitude: 31, longitude: 121, altitude: 13, speed: 20 })
     assert.equal(vm.speed, previousSpeed, 'covered reading rows do not repaint')
     assert.equal(vm.statusColor, '#7ef7c5')
+    assert.equal(vm.sleepDotLeft, 118)
+    clock.advance(20000)
+    assert.equal(vm.sleepDotLeft, 122, 'covered pages repaint the moving indicator')
+    stream.callback({ latitude: 31, longitude: 121, altitude: 13, speed: 20 })
     vm.onTouchStart({ touches: [{ clientX: 200, clientY: 100 }] })
     vm.onTouchEnd({ changedTouches: [{ clientX: 20, clientY: 100 }] })
     assert.deepEqual(routes, [])
@@ -252,6 +258,8 @@ test('waking the covered track page preserves selected file and delete confirmat
   assert.equal(vm.screenCovered, true)
   stream.callback({ latitude: 31, longitude: 121, speed: 10, altitude: 13 })
   assert.equal(vm.statusColor, '#7ef7c5')
+  assert.equal(vm.sleepDotLeft, 118)
+  clock.advance(20000); assert.equal(vm.sleepDotLeft, 122)
   assert.equal(vm.onBackPress(), true)
   assert.equal(vm.screenCovered, false); assert.equal(vm.selectedUri, uri); assert.equal(vm.confirmDelete, true)
   assert.equal(fs.data.has(uri), true); assert.deepEqual(routes, [])
