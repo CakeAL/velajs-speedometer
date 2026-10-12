@@ -210,20 +210,24 @@ test('finishing or failing a background recording keeps GPS live until app destr
   }
 })
 
-test('a synchronous manual snapshot timeout cannot later tear down the successfully attached GPS stream', async () => {
-  const clock = fakeClock(); const fs = fakeFiles(); let streams = 0; let unsubscribes = 0
-  const session = createSession({
-    file: fs.api, brightness: { setKeepScreenOn() {} },
-    geolocation: {
-      getLocation(options) { options.fail('timeout', 204) },
-      subscribe() { streams++ }, unsubscribe() { unsubscribes++ }
-    }
-  }, clock)
-  session.activate(); session.refreshLocation(); clock.advance(180000)
-  assert.equal(streams, 1); assert.equal(unsubscribes, 0)
-  assert.match(session.snapshot().gpsError, /单次定位错误 204/)
-  assert.equal(fs.data.size, 0, 'diagnostics remain in memory only')
-  await session.dispose(); assert.equal(unsubscribes, 1); assert.equal(clock.tasks, 0)
+test('manual refresh and prolonged foreground or background tracking use only subscription callbacks', async () => {
+  const h = harness(); h.session.acquire(() => {})
+  h.subscriptions[0].callback(sample); h.clock.advance(1000)
+  const average = h.session.snapshot().average
+  h.session.refreshLocation()
+  assert.equal(h.subscriptions.length, 2); assert.equal(h.unsubscribes, 0)
+  assert.equal(h.session.snapshot().average, average); assert.equal(h.session.snapshot().speed, '36')
+  h.subscriptions[0].fail('obsolete error', 203)
+  for (let i = 0; i < 60; i++) {
+    h.subscriptions[1].callback({ ...sample, altitude: 13 + i / 10 })
+    h.clock.advance(1000)
+  }
+  h.session.suspend(); h.session.refreshLocation(); h.clock.advance(180000)
+  assert.equal(h.subscriptions.length, 2, 'no new requests or subscriptions while hidden')
+  assert.equal(h.requests.length, 0); assert.equal(h.unsubscribes, 0)
+  assert.equal(h.session.snapshot().gpsError, '')
+  assert.equal(h.fs.data.size, 0, 'diagnostics remain in memory when not recording')
+  await h.session.dispose(); assert.equal(h.unsubscribes, 1); assert.equal(h.clock.tasks, 0)
 })
 
 test('ten minutes of background GPX keep one subscription, bounded timers, updated altitude and session statistics', async () => {

@@ -115,7 +115,6 @@ export function createSession(deps, clock) {
     const delay = state.phase === 'denied' || state.phase === 'unsupported' ? 15000 : 5000
     retryTimer = time.setTimeout(() => {
       retryTimer = null
-      // The initial request can fail synchronously before subscribe() is called.
       if (wanted() && !tracker.isListening()) tracker.retry()
     }, delay)
   }
@@ -129,7 +128,7 @@ export function createSession(deps, clock) {
       if (next.fix.speed !== null) stats.max = Math.max(stats.max, next.fix.speed)
     } else if (['error', 'timeout', 'denied', 'unsupported'].indexOf(next.phase) >= 0) scheduleRetry()
     emit()
-  }, time, { initialSnapshot: false, refreshInterval: 15000 })
+  }, time)
   function tick() {
     const now = time.now()
     const second = Math.floor(now / 1000)
@@ -204,7 +203,6 @@ export function createSession(deps, clock) {
       const visibleAgain = !foreground
       if (visibleAgain) noteRuntime('show')
       enterForeground()
-      tracker.setForeground(true)
       if (listeners.length > 0) {
         if (visibleAgain) holdScreenBriefly()
         start(); emit()
@@ -213,7 +211,6 @@ export function createSession(deps, clock) {
     suspend() {
       if (foreground) { noteRuntime('hide'); lastRuntimeNote = time.now() }
       foreground = false
-      tracker.setForeground(false)
       releaseScreen()
       // Keep the declared background geolocation feature running even when not
       // recording. Only the display sleeps; fresh fixes stay available on wake.

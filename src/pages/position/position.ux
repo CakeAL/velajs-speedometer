@@ -20,7 +20,7 @@
       </list-item>
       <list-item type="notice" class="notice-row {{narrow ? 'band-notice-row' : ''}}"><text class="hint {{narrow ? 'band-hint' : ''}}">{{detailNote}}</text></list-item>
       <list-item type="diagnostics" class="diagnostics {{narrow ? 'band-diagnostics' : ''}}">
-        <text class="diagnostic-text {{narrow ? 'band-diagnostic-text' : ''}}">{{gpsRequest}}</text>
+        <text class="diagnostic-text {{narrow ? 'band-diagnostic-text' : ''}}">{{gpsSubscription}}</text>
         <text class="diagnostic-text {{narrow ? 'band-diagnostic-text' : ''}}">{{gpsCallbacks}}</text>
         <text class="diagnostic-text {{narrow ? 'band-diagnostic-text' : ''}}">{{gpsAltitude}}</text>
         <text if="{{gpsError}}" class="diagnostic-text {{narrow ? 'band-diagnostic-text' : ''}}">{{gpsError}}</text>

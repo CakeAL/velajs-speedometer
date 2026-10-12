@@ -7,7 +7,7 @@ const { normalizeSpeed, normalizeLocation, locationView, createLocationTracker, 
 const { screenLayout, dashboardLayout } = await load('../src/common/layout.js')
 const sample = { latitude: 31.230416, longitude: 121.473701, speed: 10, altitude: 12.6, accuracy: 8 }
 
-function harness(options) {
+function harness() {
   let now = 100000
   let interval = null
   let unsubscribes = 0
@@ -16,7 +16,7 @@ function harness(options) {
   const changes = []
   const calls = []
   const api = {
-    getLocation(options) { calls.push('snapshot'); requests.push(options) },
+    getLocation() { requests.push('unexpected'); throw new Error('single requests must never run') },
     subscribe(options) { calls.push('subscribe'); subscriptions.push(options) },
     unsubscribe() { unsubscribes += 1 }
   }
@@ -25,7 +25,7 @@ function harness(options) {
     setInterval(callback) { interval = callback; return 1 },
     clearInterval() { interval = null }
   }
-  const tracker = createLocationTracker(api, state => changes.push(state), clock, options)
+  const tracker = createLocationTracker(api, state => changes.push(state), clock)
   return {
     api, tracker, requests, subscriptions, calls,
     advance(ms) { now += ms; if (interval) interval() },
@@ -127,138 +127,84 @@ test('paused and failed states hide old measurements', () => {
   }
 })
 
-test('starts the reference initial request and subscription immediately, once', () => {
-  const h = harness()
-  h.tracker.start()
-  h.tracker.start()
-  assert.equal(h.requests.length, 1)
-  assert.equal(h.requests[0].timeout, 60000)
-  assert.equal(h.subscriptions.length, 1)
-  assert.deepEqual(h.calls, ['snapshot', 'subscribe'])
+test('starts continuous subscription immediately once, without requesting a single fix', () => {
+  const h = harness(); h.tracker.start(); h.tracker.start()
+  assert.equal(h.requests.length, 0); assert.equal(h.subscriptions.length, 1)
+  assert.deepEqual(h.calls, ['subscribe'])
   h.subscriptions[0].callback({ speed: '10' })
-  assert.equal(h.state.phase, 'live')
-  assert.equal(h.view().speed, '36')
-})
-
-test('a late initial fix cannot overwrite a newer stream sample', () => {
-  const h = harness()
-  h.tracker.start()
-  h.subscriptions[0].callback({ ...sample, speed: 20 })
-  h.requests[0].success({ ...sample, speed: 5 })
-  h.requests[0].fail('timeout', 204)
-  assert.equal(h.state.phase, 'live')
-  assert.equal(h.view().speed, '72')
+  assert.equal(h.state.phase, 'live'); assert.equal(h.view().speed, '36')
 })
 
 test('pause clears the timer, unsubscribes and ignores callbacks', () => {
-  const h = harness()
-  h.tracker.start()
-  const request = h.requests[0]
-  const stream = h.subscriptions[0]
-  stream.callback(sample)
+  const h = harness(); h.tracker.start()
+  const stream = h.subscriptions[0]; stream.callback(sample)
   h.tracker.stop()
-  assert.equal(h.running, false)
-  assert.equal(h.unsubscribes, 1)
+  assert.equal(h.running, false); assert.equal(h.unsubscribes, 1)
   assert.equal(h.view().speed, '--')
-  request.success({ ...sample, speed: 30 })
-  stream.callback({ ...sample, speed: 40 })
+  stream.callback({ ...sample, speed: 40 }); stream.fail('denied', 400)
   assert.equal(h.state.phase, 'paused')
-  h.tracker.stop()
-  assert.equal(h.unsubscribes, 1)
+  h.tracker.stop(); assert.equal(h.unsubscribes, 1)
 })
 
-test('callbacks from a previous session cannot corrupt a resumed session', () => {
-  const h = harness()
-  h.tracker.start()
-  const previous = h.requests[0]
-  const stream = h.subscriptions[0]
-  h.tracker.retry()
-  previous.success(sample)
-  previous.fail('denied', 400)
-  stream.callback(sample)
-  stream.fail('denied', 400)
+test('callbacks from a previous subscription cannot corrupt a resumed session', () => {
+  const h = harness(); h.tracker.start()
+  const previous = h.subscriptions[0]; h.tracker.retry()
+  previous.callback(sample); previous.fail('denied', 400)
   assert.equal(h.state.phase, 'locating')
-  h.subscriptions[1].callback(sample)
-  assert.equal(h.state.phase, 'live')
+  h.subscriptions[1].callback(sample); assert.equal(h.state.phase, 'live')
 })
 
-test('initial snapshot timeout does not stop continuous listening', () => {
-  const h = harness()
-  h.tracker.start()
-  h.requests[0].fail('timeout', 204)
-  assert.equal(h.state.phase, 'timeout')
-  assert.equal(h.unsubscribes, 0)
-  assert.equal(h.tracker.isListening(), true)
-  h.subscriptions[0].callback(sample)
-  assert.equal(h.view().speed, '36')
+test('synchronous native errors and an absent subscription API stop tracking safely', () => {
+  for (const absent of [true, false]) {
+    const h = harness()
+    h.api.subscribe = absent ? undefined : options => options.fail('unsupported', 203)
+    h.tracker.start()
+    assert.equal(h.state.phase, 'unsupported'); assert.equal(h.tracker.isListening(), false)
+    assert.equal(h.running, false); assert.equal(h.requests.length, 0)
+  }
 })
 
-test('an unavailable single snapshot does not mark a valid continuous GPS subscription unsupported', () => {
-  const h = harness()
-  h.api.getLocation = undefined
-  h.tracker.start()
-  assert.equal(h.state.phase, 'locating'); assert.equal(h.tracker.isListening(), true)
-  h.subscriptions[0].callback(sample)
-  assert.equal(h.view().speed, '36')
-  h.tracker.stop(); assert.equal(h.tracker.isListening(), false)
-})
-
-test('a synchronous subscription failure invalidates the already pending initial snapshot', () => {
-  const h = harness()
-  h.api.subscribe = options => options.fail('unsupported', 203)
-  h.tracker.start()
-  assert.equal(h.state.phase, 'unsupported'); assert.equal(h.tracker.isListening(), false)
-  assert.equal(h.requests.length, 1); assert.equal(h.running, false)
-  h.requests[0].success(sample)
-  assert.equal(h.state.phase, 'unsupported')
-})
-
-test('stale timeout keeps the subscription and never starts repeated snapshots', () => {
-  const h = harness()
-  h.tracker.start()
-  h.subscriptions[0].callback(sample)
-  h.advance(5000)
-  assert.equal(h.state.phase, 'stale')
-  assert.equal(h.view().speed, '0')
+test('a long first fix wait and stale readings keep the same subscription active', () => {
+  const h = harness(); h.tracker.start(); h.advance(60000)
+  assert.equal(h.state.phase, 'timeout'); assert.equal(h.tracker.isListening(), true)
+  h.advance(600000)
+  assert.equal(h.requests.length, 0); assert.equal(h.subscriptions.length, 1); assert.equal(h.unsubscribes, 0)
+  h.subscriptions[0].callback(sample); h.advance(5000)
+  assert.equal(h.state.phase, 'stale'); assert.equal(h.view().speed, '0')
   h.advance(60000)
-  assert.equal(h.requests.length, 1)
-  assert.equal(h.unsubscribes, 0)
+  assert.equal(h.requests.length, 0); assert.equal(h.unsubscribes, 0)
   h.subscriptions[0].callback({ ...sample, speed: 20 })
-  assert.equal(h.state.phase, 'live')
-  assert.equal(h.view().speed, '72')
+  assert.equal(h.state.phase, 'live'); assert.equal(h.view().speed, '72')
+})
+
+test('manual refresh replaces the subscription without stopping GPS or freshening old measurements', () => {
+  const h = harness(); h.tracker.start(); h.subscriptions[0].callback(sample)
+  h.advance(1000); const timestamp = h.state.updatedAt
+  h.tracker.refresh()
+  assert.equal(h.subscriptions.length, 2); assert.equal(h.unsubscribes, 0)
+  assert.equal(h.state.updatedAt, timestamp); assert.equal(h.view().speed, '36')
+  h.subscriptions[0].callback({ ...sample, speed: 99 }); h.subscriptions[0].fail('denied', 400)
+  assert.equal(h.view().speed, '36'); assert.equal(h.tracker.isListening(), true)
+  h.advance(5000); assert.equal(h.view().speed, '0')
+  h.subscriptions[1].callback({ ...sample, altitude: 20.25, speed: 5 })
+  assert.equal(h.view().speed, '18'); assert.equal(h.view().altitude, '20.3')
+  assert.equal(h.requests.length, 0)
+  h.tracker.stop(); h.tracker.refresh(); assert.equal(h.subscriptions.length, 2)
 })
 
 test('invalid callbacks cannot keep an old speed alive', () => {
-  const h = harness()
-  h.tracker.start()
-  h.subscriptions[0].callback(sample)
-  h.advance(4000)
-  h.subscriptions[0].callback({ speed: NaN })
-  h.advance(1000)
+  const h = harness(); h.tracker.start(); h.subscriptions[0].callback(sample)
+  h.advance(4000); h.subscriptions[0].callback({ speed: NaN }); h.advance(1000)
   assert.equal(h.view().speed, '0')
 })
 
 for (const [code, phase] of [[203, 'unsupported'], [201, 'denied'], [207, 'denied'], [400, 'denied'], [402, 'denied']]) {
   test('subscription error ' + code + ' is visible and stops tracking', () => {
-    const h = harness()
-    h.tracker.start()
-    h.subscriptions[0].fail('failed', code)
-    assert.equal(h.state.phase, phase)
-    assert.equal(h.running, false)
-    assert.equal(h.unsubscribes, 1)
-    h.requests[0].success(sample)
-    assert.equal(h.state.phase, phase)
+    const h = harness(); h.tracker.start(); h.subscriptions[0].fail('failed', code)
+    assert.equal(h.state.phase, phase); assert.equal(h.running, false)
+    assert.equal(h.unsubscribes, 1); assert.equal(h.requests.length, 0)
   })
 }
-
-test('missing native timeout callback still produces a search timeout', () => {
-  const h = harness()
-  h.tracker.start()
-  h.advance(60000)
-  assert.equal(h.state.phase, 'timeout')
-  h.subscriptions[0].callback(sample)
-  assert.equal(h.state.phase, 'live')
-})
 
 test('layouts follow screen shape and aspect ratio instead of a model list', () => {
   assert.equal(screenLayout({ screenWidth: 466, screenHeight: 466, screenShape: 'circle' }).pageClass, 'round-page')
@@ -289,75 +235,28 @@ test('dashboard fits watch screens and keeps narrow scrolling rows and long spee
 
 test('watch-visible diagnostics distinguish a silent stream, rejected data and native errors', () => {
   const h = harness(); h.tracker.start(); h.advance(59000)
-  assert.match(h.view().gpsRequest, /等待返回/)
+  assert.match(h.view().gpsSubscription, /等待回调/)
   assert.match(h.view().gpsCallbacks, /订阅回调 0 次/)
-  h.requests[0].fail('request timeout', 204)
-  assert.match(h.view().gpsRequest, /超时 \(204\)/)
-  assert.match(h.view().gpsError, /单次定位错误 204/)
+  assert.equal(h.view().gpsError, '')
   h.subscriptions[0].callback({ speed: 'invalid' })
   assert.match(h.view().gpsCallbacks, /订阅回调 1 次 · 无效 1 次/)
   assert.equal(h.state.updatedAt, null)
   h.subscriptions[0].callback(sample)
-  assert.equal(h.view().speed, '36')
+  assert.equal(h.view().speed, '36'); assert.match(h.view().gpsSubscription, /已回调/)
   assert.match(h.view().gpsCallbacks, /订阅回调 2 次 · 无效 1 次/)
   h.subscriptions[0].fail('unsupported', 203)
-  assert.match(h.view().gpsError, /订阅错误 203/)
+  assert.match(h.view().gpsError, /订阅错误 203/); assert.match(h.view().gpsSubscription, /失败/)
   assert.equal(h.tracker.isListening(), false)
 })
 
-test('a synchronous single fix is retained while the subscription is attached afterwards', () => {
-  const h = harness()
-  h.api.getLocation = options => options.success(sample)
-  h.tracker.start()
-  assert.equal(h.view().speed, '36')
-  assert.match(h.view().gpsRequest, /已返回/)
-  assert.equal(h.tracker.isListening(), true)
-  h.subscriptions[0].callback({ ...sample, speed: 5 })
-  assert.equal(h.view().speed, '18')
-})
-
-test('foreground supplemental snapshots refresh altitude without replacing newer stream speed or coordinates', () => {
-  const h = harness({ initialSnapshot: false, refreshInterval: 15000 }); h.tracker.start()
-  assert.equal(h.requests.length, 0)
-  h.subscriptions[0].callback(sample); h.advance(15000)
-  assert.equal(h.requests.length, 1)
-  h.subscriptions[0].callback({ ...sample, speed: 20, latitude: 32 })
-  const timestamp = h.state.updatedAt
-  h.requests[0].success({ ...sample, speed: 1, altitude: 20.25 })
-  assert.equal(h.view().speed, '72'); assert.equal(h.state.fix.latitude, 32)
-  assert.equal(h.view().altitude, '20.3'); assert.equal(h.state.updatedAt, timestamp)
+test('altitude is updated exclusively from subscription callbacks, including sub-meter changes', () => {
+  const h = harness(); h.tracker.start(); h.subscriptions[0].callback(sample)
   h.advance(15000)
-  h.subscriptions[0].callback({ ...sample, altitude: 40 })
-  h.requests[1].success({ ...sample, altitude: 25 })
-  assert.equal(h.view().altitude, '40.0', 'a late supplement cannot undo a newer height change')
-  assert.match(h.view().gpsAltitude, /变化/)
-})
-
-test('a snapshot completing after screen-off reasserts the background stream and rejects the old handler', () => {
-  const h = harness({ initialSnapshot: false, refreshInterval: 15000 }); h.tracker.start()
-  h.subscriptions[0].callback(sample); h.advance(15000)
-  const old = h.subscriptions[0]
-  h.tracker.setForeground(false)
-  h.requests[0].success({ ...sample, altitude: 30 })
-  assert.equal(h.subscriptions.length, 2); assert.equal(h.unsubscribes, 0)
-  old.callback({ ...sample, speed: 99 })
-  assert.equal(h.view().speed, '36')
-  h.subscriptions[1].callback({ ...sample, speed: 5, altitude: 31 })
-  assert.equal(h.view().speed, '18'); assert.equal(h.view().altitude, '31.0')
-  h.advance(300000)
-  assert.equal(h.requests.length, 1, 'screen-off must not initiate more single requests')
-  h.tracker.stop(); assert.equal(h.unsubscribes, 1)
-})
-
-test('supplemental requests are bounded, time out if firmware forgets callbacks and never revive stale fixes', () => {
-  const h = harness({ initialSnapshot: false, refreshInterval: 15000 }); h.tracker.start()
-  h.subscriptions[0].callback(sample); h.advance(15000)
-  h.tracker.refresh(); assert.equal(h.requests.length, 1)
-  h.advance(10000)
-  assert.match(h.view().gpsRequest, /超时/)
-  h.requests[0].success({ ...sample, speed: 99 })
-  assert.equal(h.view().speed, '0')
-  h.tracker.refresh(); assert.equal(h.requests.length, 2)
-  h.tracker.stop(); h.requests[1].success(sample)
-  assert.equal(h.state.phase, 'paused')
+  h.subscriptions[0].callback({ ...sample, altitude: 12.85, speed: 5 })
+  assert.equal(h.view().altitude, '12.8'); assert.equal(h.view().speed, '18')
+  assert.match(h.view().gpsAltitude, /海拔回传 2 次 · 变化 1 次/)
+  h.advance(15000)
+  h.subscriptions[0].callback({ ...sample, altitude: null })
+  assert.equal(h.view().altitude, '--', 'missing altitude is never filled from an older sample')
+  assert.equal(h.requests.length, 0)
 })
