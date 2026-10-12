@@ -45,14 +45,33 @@ test('native subscription errors retry in background, ignore old callbacks and s
   const h = harness(); const listener = () => {}; h.session.acquire(listener)
   h.session.release(listener); h.session.suspend()
   h.subscriptions[0].fail('error', 1000)
-  assert.match(h.session.snapshot().statusText, /自动重试/)
-  h.clock.advance(4999); assert.equal(h.subscriptions.length, 1)
-  h.clock.advance(1); assert.equal(h.subscriptions.length, 2)
+  assert.match(h.session.snapshot().statusText, /搜星中/)
+  assert.equal(h.subscriptions.length, 2, 'restore the native background feature before returning from failure')
   h.subscriptions[0].callback(sample); assert.equal(h.session.snapshot().speed, '--')
   h.subscriptions[1].callback(sample); assert.equal(h.session.snapshot().speed, '36')
   h.subscriptions[1].fail('denied', 400)
   await h.session.dispose(); h.clock.advance(30000)
   assert.equal(h.subscriptions.length, 2); assert.equal(h.clock.tasks, 0)
+})
+
+test('synchronous background subscription failures have bounded retries and permission failures stay delayed', async () => {
+  const clock = fakeClock(); const fs = fakeFiles(); const streams = []
+  let failImmediately = false
+  const session = createSession({ file: fs.api, brightness: { setKeepScreenOn() {} },
+    geolocation: { subscribe(options) { streams.push(options); if (failImmediately) options.fail('unavailable', 1000) }, unsubscribe() {} }
+  }, clock)
+  session.activate(); session.suspend(); failImmediately = true
+  streams[0].fail('unavailable', 1000)
+  assert.equal(streams.length, 2, 'one immediate retry must not recurse after synchronous failure')
+  clock.advance(4999); assert.equal(streams.length, 2)
+  clock.advance(1); assert.equal(streams.length, 4, 'delayed retry plus one bounded immediate recovery')
+  failImmediately = false
+  clock.advance(5000); assert.equal(streams.length, 5)
+  streams[4].fail('denied', 400)
+  clock.advance(14999); assert.equal(streams.length, 5, 'permission errors must not retry immediately')
+  clock.advance(1); assert.equal(streams.length, 6)
+  await session.dispose(); clock.advance(30000)
+  assert.equal(streams.length, 6); assert.equal(clock.tasks, 0)
 })
 
 test('slow first fix and a long signal gap do not cancel an existing GPS subscription', async () => {

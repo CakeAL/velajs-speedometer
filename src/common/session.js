@@ -23,6 +23,8 @@ export function createSession(deps, clock) {
   let trackingRequested = false
   let tickTimer = null
   let retryTimer = null
+  let recoveringInBackground = false
+  let lastBackgroundRetry = -Infinity
   let screenTimer = null
   let lastSecond = null
   let disposed = false
@@ -94,6 +96,14 @@ export function createSession(deps, clock) {
     // A pending fix or a quiet stream is not a failed subscription. Unsubscribing
     // here can interrupt a cold start; only restart after a native stream error.
     if (retryTimer !== null || !wanted() || tracker.isListening()) return
+    // Once the last native background feature stops, Vela may suspend JS before
+    // a delayed timer can run. Restore one ordinary stream error immediately.
+    // Bound synchronous failures to one attempt instead of recursive retrying.
+    if (!foreground && state.phase === 'error' && !recoveringInBackground && time.now() - lastBackgroundRetry >= 5000) {
+      lastBackgroundRetry = time.now(); recoveringInBackground = true
+      try { tracker.retry() } finally { recoveringInBackground = false }
+      if (tracker.isListening() || retryTimer !== null) return
+    }
     const delay = state.phase === 'denied' || state.phase === 'unsupported' ? 15000 : 5000
     retryTimer = time.setTimeout(() => {
       retryTimer = null
