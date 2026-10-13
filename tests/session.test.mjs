@@ -162,7 +162,7 @@ test('failed recording is released so the file page can recover its partial GPX'
   await h.session.dispose()
 })
 
-test('unrecorded idle shows a black cover, while recording keeps the full UI bright by default', async () => {
+test('default idle shows the black cover both before and during recording', async () => {
   const h = harness(); h.session.acquire(() => {})
   assert.equal(h.screen.at(-1), true)
   h.clock.advance(9999); assert.equal(h.screen.at(-1), true)
@@ -174,6 +174,9 @@ test('unrecorded idle shows a black cover, while recording keeps the full UI bri
   h.subscriptions[0].fail('failed', 1000)
   h.clock.advance(5000); assert.equal(h.subscriptions.length, 2)
   assert.equal(h.screen.at(-1), true)
+  h.clock.advance(5000)
+  assert.equal(h.session.snapshot().screenCovered, true, 'recording uses the default automatic black cover')
+  assert.equal(h.session.snapshot().recording, true)
   await h.session.dispose(); assert.equal(h.clock.tasks, 0)
 })
 
@@ -234,8 +237,7 @@ test('manual refresh and prolonged foreground or background tracking use only su
 
 test('ten minutes of background GPX keep one subscription, bounded timers, updated altitude and session statistics', async () => {
   const h = harness(); const listener = () => {}; h.session.acquire(listener)
-  // Explicitly choose automatic screen-off instead of the safe recording default.
-  h.session.changeScreenMode(); h.session.changeScreenMode()
+  // The automatic black cover is the default, including while recording.
   assert.match(h.session.snapshot().screenModeText, /自动熄屏/)
   h.subscriptions[0].callback(sample); await h.session.toggleRecording()
   h.session.release(listener); h.session.suspend()
@@ -263,7 +265,7 @@ test('ten minutes of background GPX keep one subscription, bounded timers, updat
 test('screen modes keep the native display awake and only cover the UI in automatic mode', async () => {
   const h = harness(); h.session.acquire(() => {})
   h.session.changeScreenMode()
-  assert.equal(h.session.snapshot().screenModeText, '始终常亮')
+  assert.equal(h.session.snapshot().screenModeText, '常亮')
   h.clock.advance(60000); assert.equal(h.screen.at(-1), true)
   assert.equal(h.session.snapshot().screenCovered, false)
   h.session.changeScreenMode()
@@ -276,7 +278,7 @@ test('screen modes keep the native display awake and only cover the UI in automa
   assert.equal(h.session.snapshot().screenCovered, true)
   await h.session.toggleRecording(); await h.session.dispose()
   const fresh = harness()
-  assert.equal(fresh.session.snapshot().screenModeText, '记录时常亮', 'preferences are not saved to storage')
+  assert.equal(fresh.session.snapshot().screenModeText, '10 秒自动熄屏', 'preferences are not saved to storage')
   await fresh.session.dispose()
 })
 

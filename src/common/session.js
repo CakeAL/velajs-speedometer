@@ -9,7 +9,7 @@ const STATUS = {
 }
 
 const SCREEN_HOLD_MS = 10000
-const SCREEN_MODES = ['记录时常亮', '始终常亮', '10 秒自动熄屏']
+const SCREEN_MODES = ['10 秒自动熄屏', '常亮']
 const DOT_SHIFT_MS = 20000
 const DOT_OFFSETS = [0, 4, 8, 4, 0, -4, -8, -4]
 
@@ -89,7 +89,7 @@ export function createSession(deps, clock) {
     screenCovered = false
     coverStartedAt = null
     keepScreenOn(true)
-    if (screenMode === 1 || (screenMode === 0 && (record.recording || record.saving))) return
+    if (screenMode === 1) return
     screenTimer = time.setTimeout(() => {
       screenTimer = null
       if (!foreground || disposed) return
