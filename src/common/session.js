@@ -1,4 +1,4 @@
-import { createLocationTracker, locationView, UNITS, SPEED_STALE_AFTER } from './location'
+import { createLocationTracker, locationView, locationTone, UNITS, SPEED_STALE_AFTER } from './location'
 import { createRecorder } from './recording'
 import { emptyStats, addSpeed, statsView } from './statistics'
 
@@ -9,6 +9,7 @@ const STATUS = {
 }
 
 const SCREEN_HOLD_MS = 10000
+const SCREEN_RETRY_MS = 5000
 const SCREEN_MODES = ['10 秒自动熄屏', '常亮']
 const DOT_SHIFT_MS = 20000
 const DOT_OFFSETS = [0, 4, 8, 4, 0, -4, -8, -4]
@@ -24,6 +25,8 @@ export function createSession(deps, clock) {
   let screenCovered = false
   let coverStartedAt = null
   let screenError = ''
+  let screenRequest = null
+  let lastCoverView = null
   let trackingRequested = false
   let tickTimer = null
   let retryTimer = null
@@ -34,45 +37,61 @@ export function createSession(deps, clock) {
   let disposed = false
   let record = { recording: false, saving: false, points: 0, startedAt: null, message: '' }
 
+  function coverView(now, tone = locationTone(state, now)) {
+    const dotStep = screenCovered && coverStartedAt !== null ? Math.floor(Math.max(0, now - coverStartedAt) / DOT_SHIFT_MS) : 0
+    // All pages use manifest.designWidth = 240. No extra timer is needed.
+    return { screenCovered, statusColor: tone === 'good' ? '#7ef7c5' : '#f2bf68',
+      sleepDotLeft: 118 + DOT_OFFSETS[dotStep % DOT_OFFSETS.length] }
+  }
   function view() {
     const now = time.now()
     const readings = locationView(state, unitIndex, now)
     const elapsed = record.startedAt === null ? 0 : Math.floor((now - record.startedAt) / 1000)
     const duration = Math.floor(elapsed / 60) + ':' + ('0' + elapsed % 60).slice(-2)
-    const dotStep = screenCovered && coverStartedAt !== null ? Math.floor(Math.max(0, now - coverStartedAt) / DOT_SHIFT_MS) : 0
-    return { ...readings, ...statsView(stats, UNITS[unitIndex].factor),
+    return { ...readings, ...statsView(stats, UNITS[unitIndex].factor), ...coverView(now, readings.tone),
       statusText: STATUS[state.phase] || STATUS.error,
-      statusColor: readings.tone === 'good' ? '#7ef7c5' : '#f2bf68',
       recording: record.recording, saving: record.saving,
-      screenModeText: SCREEN_MODES[screenMode], screenError, screenCovered,
-      // All pages use manifest.designWidth = 240. The 4px dot starts centered
-      // and moves in 4px steps, without adding another native timer.
-      sleepDotLeft: 118 + DOT_OFFSETS[dotStep % DOT_OFFSETS.length],
+      screenModeText: SCREEN_MODES[screenMode], screenError,
       recordText: record.saving ? '保存中' : (record.recording ? '结束' : '记录'),
       recordDuration: duration, recordPoints: record.points,
       recordNotice: record.recording ? '' : record.message }
   }
   function emit() {
-    if (!foreground) return
-    const current = view()
+    if (!foreground || listeners.length === 0) return
+    const current = screenCovered ? coverView(time.now()) : view()
+    if (screenCovered && lastCoverView && current.statusColor === lastCoverView.statusColor &&
+        current.sleepDotLeft === lastCoverView.sleepDotLeft) return
+    lastCoverView = screenCovered ? current : null
     listeners.slice().forEach(listener => {
       try { listener(current) } catch (error) { console.error('页面更新失败：' + error.message) }
     })
   }
   function keepScreenOn(enabled) {
+    // Re-arm the idle timer on touch, not the native constant-screen request.
+    // Pending/successful requests are reused; failures can retry on later input.
+    if (screenRequest && screenRequest.enabled === enabled &&
+        (!screenRequest.failed || time.now() - screenRequest.at < SCREEN_RETRY_MS)) return
+    const request = { enabled, failed: false, at: time.now() }
+    screenRequest = request
     function failed(data, code) {
-      if (disposed) return
+      if (disposed || screenRequest !== request) return
+      request.failed = true; request.at = time.now()
       const detail = typeof data === 'string' ? data.replace(/\s+/g, ' ').slice(0, 64) : ''
       screenError = '常亮未生效' + (code === undefined ? '' : ' (' + code + ')') + (detail ? ' · ' + detail : '')
       emit()
     }
     if (!deps.brightness || typeof deps.brightness.setKeepScreenOn !== 'function') {
+      request.failed = true
       screenError = '当前环境未提供常亮接口'
       emit()
       return
     }
     try { deps.brightness.setKeepScreenOn({ keepScreenOn: enabled,
-      success() { if (!disposed && screenError) { screenError = ''; emit() } }, fail: failed }) }
+      success() {
+        if (disposed || screenRequest !== request) return
+        request.failed = false
+        if (screenError) { screenError = ''; emit() }
+      }, fail: failed }) }
     catch (error) { failed(error.message) }
   }
   function releaseScreen() {
@@ -80,6 +99,7 @@ export function createSession(deps, clock) {
     screenTimer = null
     screenCovered = false
     coverStartedAt = null
+    lastCoverView = null
     keepScreenOn(false)
   }
   function holdScreenBriefly() {
@@ -88,6 +108,7 @@ export function createSession(deps, clock) {
     if (!foreground || disposed) { keepScreenOn(false); return }
     screenCovered = false
     coverStartedAt = null
+    lastCoverView = null
     keepScreenOn(true)
     if (screenMode === 1) return
     screenTimer = time.setTimeout(() => {

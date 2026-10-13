@@ -394,6 +394,86 @@ test('the top-edge GPS dot shifts every twenty seconds without adding timers or 
   await h.session.dispose(); assert.equal(h.clock.tasks, 0)
 })
 
+test('black-cover updates skip reading formatting and notify only when the indicator changes', async () => {
+  const h = harness(); const values = []; h.session.acquire(value => values.push(value))
+  h.subscriptions[0].callback(sample); h.clock.advance(10000)
+  h.subscriptions[0].callback(sample)
+  const updates = values.length
+  const original = Number.prototype.toFixed
+  let formats = 0
+  try {
+    Number.prototype.toFixed = function(digits) { formats++; return original.call(this, digits) }
+    for (let i = 0; i < 19; i++) {
+      h.subscriptions[0].callback({ ...sample, speed: 20, altitude: 100 + i })
+      h.clock.advance(1000)
+    }
+    assert.equal(formats, 0, 'covered UI must not format speed, coordinates, altitude or statistics')
+    assert.equal(values.length, updates, 'fresh GPS and sampling ticks do not repeat the same dot')
+    h.clock.advance(1000)
+    assert.equal(values.length, updates + 1)
+    assert.deepEqual(values.at(-1), { screenCovered: true, statusColor: '#7ef7c5', sleepDotLeft: 122 })
+    h.subscriptions[0].callback({ ...sample, accuracy: 80 })
+    assert.equal(values.at(-1).statusColor, '#f2bf68')
+    h.subscriptions[0].callback({ ...sample, speed: 20, altitude: 118 })
+    assert.equal(values.at(-1).statusColor, '#7ef7c5')
+    assert.equal(formats, 0)
+    h.session.interact()
+    assert.ok(formats > 0, 'wake generates the complete latest readings')
+    assert.equal(values.at(-1).screenCovered, false)
+    assert.equal(values.at(-1).speed, '72'); assert.equal(values.at(-1).altitude, '118.0')
+    assert.equal(values.at(-1).maximum, '72.0')
+  } finally { Number.prototype.toFixed = original; await h.session.dispose() }
+})
+
+test('touches, page changes and recording reuse a pending or successful native screen hold', async () => {
+  for (const complete of [false, true]) {
+    const clock = fakeClock(); const fs = fakeFiles(); const requests = []; const listener = () => {}
+    const session = createSession({ file: fs.api,
+      brightness: { setKeepScreenOn(options) { requests.push(options); if (complete) options.success() } },
+      geolocation: { subscribe() {}, unsubscribe() {} }
+    }, clock)
+    session.activate(); session.acquire(listener)
+    for (let i = 0; i < 100; i++) session.interact()
+    session.release(listener); session.acquire(listener)
+    session.changeScreenMode(); session.changeScreenMode()
+    await session.toggleRecording()
+    clock.advance(10000)
+    assert.equal(session.snapshot().screenCovered, true)
+    session.interact(); await session.toggleRecording()
+    assert.deepEqual(requests.map(item => item.keepScreenOn), [true])
+    session.suspend(); session.suspend()
+    assert.deepEqual(requests.map(item => item.keepScreenOn), [true, false])
+    session.resume(); session.acquire(listener)
+    assert.deepEqual(requests.map(item => item.keepScreenOn), [true, false, true])
+    await session.dispose()
+    assert.deepEqual(requests.map(item => item.keepScreenOn), [true, false, true, false])
+    assert.equal(clock.tasks, 0)
+  }
+})
+
+test('failed screen requests retry after a cooldown and obsolete callbacks cannot change the warning', async () => {
+  const clock = fakeClock(); const fs = fakeFiles(); const requests = []
+  const session = createSession({ file: fs.api,
+    brightness: { setKeepScreenOn(options) { requests.push(options) } },
+    geolocation: { subscribe() {}, unsubscribe() {} }
+  }, clock)
+  session.activate(); session.acquire(() => {})
+  requests[0].fail('first failure', 200)
+  for (let i = 0; i < 100; i++) session.interact()
+  clock.advance(4999); session.interact(); assert.equal(requests.length, 1)
+  clock.advance(1); session.interact(); assert.equal(requests.length, 2)
+  requests[1].success(); assert.equal(session.snapshot().screenError, '')
+  requests[0].fail('obsolete', 203); assert.equal(session.snapshot().screenError, '')
+  session.suspend(); session.resume()
+  requests[3].fail('current failure', 201)
+  requests[2].success()
+  assert.match(session.snapshot().screenError, /current failure/)
+  clock.advance(10000); assert.equal(session.snapshot().screenCovered, true)
+  session.interact(); requests[4].success()
+  assert.equal(session.snapshot().screenError, '')
+  await session.dispose(); assert.equal(clock.tasks, 0)
+})
+
 test('foreground, background and subscription retries never append runtime notes to GPX', async () => {
   const h = harness(); h.session.acquire(() => {})
   h.subscriptions[0].callback(sample); await h.session.toggleRecording()

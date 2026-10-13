@@ -56,6 +56,15 @@ function coordinateView(value, latitude) {
   }
 }
 
+// The black cover needs only GPS health, without formatting any readings.
+export function locationTone(state, now) {
+  const tracking = state.phase === 'live' || state.phase === 'stale'
+  const ageMs = state.updatedAt === null ? null : Math.max(0, now - state.updatedAt)
+  const fresh = tracking && state.fix && ageMs < SPEED_STALE_AFTER
+  return fresh ? (state.fix.accuracy !== null && state.fix.accuracy > 50 ? 'warning' : 'good') :
+    (state.phase === 'paused' ? 'muted' : 'warning')
+}
+
 export function locationView(state, unitIndex, now) {
   const unit = UNITS[unitIndex] || UNITS[0]
   const tracking = state.phase === 'live' || state.phase === 'stale'
@@ -66,7 +75,6 @@ export function locationView(state, unitIndex, now) {
   // reading as awaiting updates, so this zero is not presented as a fresh fix.
   const speed = tracking && state.fix && state.fix.speed !== null ?
     formatCurrentSpeed(ageMs >= SPEED_STALE_AFTER ? 0 : state.fix.speed, unitIndex) : '--'
-  const speedStale = tracking && ageMs >= SPEED_STALE_AFTER
   const latitude = coordinateView(fix && fix.latitude, true)
   const longitude = coordinateView(fix && fix.longitude, false)
   const diagnostics = state.diagnostics
@@ -82,8 +90,7 @@ export function locationView(state, unitIndex, now) {
     gpsCallbacks: diagnostics ? '订阅回调 ' + diagnostics.stream + ' 次 · 无效 ' + diagnostics.invalid + ' 次' : '订阅尚未启动',
     gpsError: diagnostics && diagnostics.error ? diagnostics.error : '',
     gpsAltitude: diagnostics ? '海拔回传 ' + diagnostics.altitudeSamples + ' 次 · 变化 ' + diagnostics.altitudeChanges + ' 次' : '尚未收到海拔',
-    tone: fresh && !speedStale ? (fix.accuracy !== null && fix.accuracy > 50 ? 'warning' : 'good') :
-      (state.phase === 'paused' ? 'muted' : 'warning')
+    tone: locationTone(state, now)
   }
 }
 
