@@ -21,9 +21,6 @@ export default {
   onHide() {
     if (this.session) this.session.suspend()
   },
-  onError() {
-    if (this.session) this.session.reportError()
-  },
   onDestroy() {
     if (this.trackSync) this.trackSync.dispose()
     if (this.session) this.session.dispose()

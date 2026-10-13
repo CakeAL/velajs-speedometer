@@ -8,7 +8,6 @@
         <list-item type="reading" class="file-reading {{narrow ? 'band-file-reading' : ''}}"><text class="file-label {{narrow ? 'band-file-label' : ''}}">时长</text><text class="file-value {{narrow ? 'band-file-value' : ''}}">{{duration}}</text></list-item>
         <list-item type="reading" class="file-reading {{narrow ? 'band-file-reading' : ''}}"><text class="file-label {{narrow ? 'band-file-label' : ''}}">海拔范围</text><text class="file-value {{narrow ? 'band-file-value' : ''}}">{{elevation}}</text></list-item>
         <list-item type="notice" class="notice-row {{narrow ? 'band-notice-row' : ''}}"><text class="hint {{narrow ? 'band-hint' : ''}}">{{message}}</text></list-item>
-        <list-item if="{{runtimeTrace}}" type="runtime" class="runtime-row {{narrow ? 'band-runtime-row' : ''}}"><text class="runtime-text {{narrow ? 'band-runtime-text' : ''}}">{{runtimeTrace}}</text></list-item>
         <list-item type="delete" class="delete-row {{narrow ? 'band-delete-row' : ''}}">
           <div class="action delete-button {{narrow ? 'band-action' : ''}} {{narrow ? 'band-delete-button' : ''}}" onclick="deleteSelected"><text class="action-text {{narrow ? 'band-action-text' : ''}}">{{confirmDelete ? '确认删除' : '删除文件'}}</text></div>
           <div if="{{confirmDelete}}" class="action secondary cancel-button {{narrow ? 'band-action' : ''}}" onclick="cancelDelete"><text class="action-text {{narrow ? 'band-action-text' : ''}}">取消</text></div>
@@ -59,7 +58,7 @@ function clearSelection(page, message) {
 export default {
   private: {
     pageClass: 'round-page', narrow: false, files: [], selectedUri: '', selectedName: '',
-    pointCount: '--', duration: '--', elevation: '--', runtimeTrace: '', message: '', syncStatus: '', confirmDelete: false, busy: false,
+    pointCount: '--', duration: '--', elevation: '--', message: '', syncStatus: '', confirmDelete: false, busy: false,
     screenCovered: false, statusColor: '#f2bf68', sleepDotLeft: 118
   },
   onInit() {
@@ -117,13 +116,12 @@ export default {
     const entry = this.files.filter(item => item.uri === uri)[0]
     if (!entry) return
     this.selectedUri = uri; this.selectedName = entry.label; this.confirmDelete = false
-    this.pointCount = '--'; this.duration = '--'; this.elevation = '--'; this.runtimeTrace = ''; this.message = '正在读取轨迹'
+    this.pointCount = '--'; this.duration = '--'; this.elevation = '--'; this.message = '正在读取轨迹'
     const version = ++this._version
     try {
       const summary = await summarizeTrack(file, uri)
       if (this._destroyed || version !== this._version) return
       this.pointCount = String(summary.points); this.duration = summary.duration; this.elevation = summary.elevation
-      this.runtimeTrace = summary.runtimeTrace
       this.message = summary.complete ? '时间按手表当前时区显示' : '文件未完整结束'
     } catch (error) { if (!this._destroyed && version === this._version) this.message = error.message }
   },
@@ -177,8 +175,6 @@ export default {
 .file-detail { flex: 1; width: 100%; }
 .filename-row { width: 100%; height: 30px; align-items: center; }
 .notice-row { width: 100%; height: 28px; align-items: center; }
-.runtime-row { width: 100%; height: 120px; align-items: center; }
-.runtime-text { width: 100%; font-size: 11px; color: #96aeb8; lines: 8; }
 .filename { width: 100%; font-size: 11px; color: #96aeb8; lines: 2; }
 .file-reading { width: 100%; height: 30px; align-items: center; justify-content: space-between; }
 .file-label { color: #96aeb8; font-size: 11px; }
@@ -196,8 +192,6 @@ export default {
 .band-filename { font-size: 17px; }
 .band-filename-row { height: 52px; }
 .band-notice-row { height: 56px; }
-.band-runtime-row { height: 200px; }
-.band-runtime-text { font-size: 17px; }
 .band-file-reading { height: 70px; flex-direction: column; justify-content: center; }
 .band-file-label { font-size: 18px; }
 .band-file-value { font-size: 26px; }

@@ -29,7 +29,6 @@ export function createSession(deps, clock) {
   let retryTimer = null
   let recoveringInBackground = false
   let lastBackgroundRetry = -Infinity
-  let lastRuntimeNote = 0
   let screenTimer = null
   let lastSecond = null
   let disposed = false
@@ -111,12 +110,6 @@ export function createSession(deps, clock) {
     record = next; emit()
     if (changed && foreground && !disposed) holdScreenBriefly()
   })
-  function noteRuntime(kind) {
-    const diagnostics = state.diagnostics || {}
-    const code = /错误 (-?\d+)/.exec(diagnostics.error || '')
-    recorder.noteEvent(kind, time.now(), { gps: diagnostics.stream || 0, phase: state.phase,
-      code: code ? Number(code[1]) : null })
-  }
   function wanted() {
     // GPS belongs to the app, not to a visible page or an active GPX recording.
     return !disposed && trackingRequested
@@ -131,7 +124,6 @@ export function createSession(deps, clock) {
     // Bound synchronous failures to one attempt instead of recursive retrying.
     if (!foreground && state.phase === 'error' && !recoveringInBackground && time.now() - lastBackgroundRetry >= 5000) {
       lastBackgroundRetry = time.now(); recoveringInBackground = true
-      noteRuntime('retry')
       try { tracker.retry() } finally { recoveringInBackground = false }
       if (tracker.isListening() || retryTimer !== null) return
     }
@@ -142,10 +134,7 @@ export function createSession(deps, clock) {
     }, delay)
   }
   const tracker = createLocationTracker(deps.geolocation, next => {
-    const previous = state
     state = next
-    if (['error', 'denied', 'unsupported'].indexOf(next.phase) >= 0 &&
-        (previous.phase !== next.phase || (previous.diagnostics || {}).error !== next.diagnostics.error)) noteRuntime('gpsfail')
     if (next.phase === 'live') {
       clearRetry()
       if (next.fix.speed !== null) stats.max = Math.max(stats.max, next.fix.speed)
@@ -159,9 +148,6 @@ export function createSession(deps, clock) {
       (state.phase === 'live' || state.phase === 'stale')
     if (second !== lastSecond) {
       lastSecond = second
-      if (record.recording && !foreground && now - lastRuntimeNote >= 60000) {
-        lastRuntimeNote = now; noteRuntime('tick')
-      }
       if (fresh) stats = addSpeed(stats, state.fix.speed)
       recorder.sample(state.fix, now, fresh)
     }
@@ -217,9 +203,8 @@ export function createSession(deps, clock) {
     },
     async toggleRecording() {
       if (record.saving) return
-      if (record.recording) { noteRuntime('stop'); return recorder.finish() }
+      if (record.recording) return recorder.finish()
       await recorder.start(time.now())
-      lastRuntimeNote = time.now(); noteRuntime(foreground ? 'show' : 'hide')
     },
     activeUri() {
       const current = recorder.snapshot()
@@ -228,7 +213,6 @@ export function createSession(deps, clock) {
     resume() {
       if (disposed) return
       const visibleAgain = !foreground
-      if (visibleAgain) noteRuntime('show')
       enterForeground()
       if (listeners.length > 0) {
         if (visibleAgain) holdScreenBriefly()
@@ -236,14 +220,12 @@ export function createSession(deps, clock) {
       }
     },
     suspend() {
-      if (foreground) { noteRuntime('hide'); lastRuntimeNote = time.now() }
       foreground = false
       releaseScreen()
       // Keep the declared background geolocation feature running even when not
       // recording. Only the display sleeps; fresh fixes stay available on wake.
     },
     async dispose() {
-      noteRuntime('dispose')
       disposed = true
       trackingRequested = false
       foreground = false
@@ -252,9 +234,6 @@ export function createSession(deps, clock) {
         try { await recorder.finish() } catch (error) { /* Recoverable .part is retained. */ }
       }
       listeners = []
-    },
-    reportError() {
-      if (!disposed) noteRuntime('error')
     }
   }
 }
